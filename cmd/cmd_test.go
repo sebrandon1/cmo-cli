@@ -8,6 +8,8 @@ import (
 	"crypto/x509/pkix"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
+	"fmt"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -479,5 +481,48 @@ func TestUnknownSubcommand(t *testing.T) {
 	}
 	if r := run(t, "issuer"); r.err != nil || !strings.Contains(r.stdout, "Usage:") {
 		t.Errorf("bare group: %v", r.err)
+	}
+}
+
+func TestCertListExpiringWithin(t *testing.T) {
+	soon := kubetest.Obj("cert-manager.io/v1", "Certificate", "default", "soon", map[string]any{
+		"spec":   map[string]any{"secretName": "soon-tls", "issuerRef": map[string]any{"name": "ca"}},
+		"status": map[string]any{"notAfter": time.Now().Add(12 * time.Hour).UTC().Format(time.RFC3339)},
+	})
+	later := kubetest.Obj("cert-manager.io/v1", "Certificate", "default", "later", map[string]any{
+		"spec":   map[string]any{"secretName": "later-tls", "issuerRef": map[string]any{"name": "ca"}},
+		"status": map[string]any{"notAfter": time.Now().Add(60 * 24 * time.Hour).UTC().Format(time.RFC3339)},
+	})
+	use(t, fakeCluster(t, false, nil, soon, later))
+
+	r := run(t, "cert", "list", "--expiring-within", "1d")
+	if ExitCode(r.err) != ExitFound || !strings.Contains(r.err.Error(), "1 certificate expire") {
+		t.Errorf("err = %v (exit %d), want exit %d", r.err, ExitCode(r.err), ExitFound)
+	}
+	mustContain(t, "expiring", r.stdout, "soon")
+	if strings.Contains(r.stdout, "later") {
+		t.Error("listed a certificate outside the window")
+	}
+
+	r = run(t, "cert", "list", "--expiring-within", "1h")
+	if r.err != nil || !strings.Contains(r.stdout, "No certificates expire within 1h") {
+		t.Errorf("nothing expiring: %q, %v", r.stdout, r.err)
+	}
+	r = run(t, "cert", "list", "--expiring-within", "1h", "-o", "json")
+	if r.err != nil || strings.TrimSpace(r.stdout) != "[]" {
+		t.Errorf("json, nothing expiring: %q, %v", r.stdout, r.err)
+	}
+	if r = run(t, "cert", "list", "--expiring-within", "soon"); ExitCode(r.err) != 1 {
+		t.Errorf("bad window: exit %d", ExitCode(r.err))
+	}
+}
+
+func TestExitCode(t *testing.T) {
+	if ExitCode(nil) != 0 || ExitCode(errors.New("x")) != 1 {
+		t.Error("plain exit codes")
+	}
+	wrapped := fmt.Errorf("context: %w", &ExitError{Code: ExitFound, Err: errors.New("found")})
+	if ExitCode(wrapped) != ExitFound || wrapped.Error() != "context: found" {
+		t.Errorf("wrapped ExitError: %d %q", ExitCode(wrapped), wrapped.Error())
 	}
 }
