@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -33,8 +34,10 @@ func For(ctx context.Context, interval, timeout time.Duration, f Func) error {
 	for {
 		done, err := f(ctx)
 		if err != nil {
-			// A call cut off by the deadline is the wait timing out.
-			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			// A call cut off by the deadline is the wait timing out, and so is
+			// one the client's rate limiter refused because it would end
+			// after the deadline.
+			if errors.Is(ctx.Err(), context.DeadlineExceeded) || rateLimitedPastDeadline(err) {
 				return ErrTimeout
 			}
 			return err
@@ -51,6 +54,14 @@ func For(ctx context.Context, interval, timeout time.Duration, f Func) error {
 		case <-t.C:
 		}
 	}
+}
+
+// rateLimitedPastDeadline reports whether err is client-go's rate limiter
+// refusing a request because it would only start after the deadline. It
+// returns that before the deadline passes, and it doesn't wrap
+// context.DeadlineExceeded.
+func rateLimitedPastDeadline(err error) bool {
+	return strings.Contains(err.Error(), "would exceed context deadline")
 }
 
 // Condition is one entry of an object's .status.conditions.

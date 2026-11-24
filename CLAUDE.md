@@ -63,6 +63,8 @@ A Cobra CLI with the same layout as `sebrandon1/vsno` and `sebrandon1/succulent-
   - `WaitReady` stops early if the CertificateRequest for the awaited revision failed or was denied.
   - `Diagnose` follows owner references from Certificate to CertificateRequest to Order to Challenge.
   - `Renew` sets the Issuing condition, as cmctl does.
+- `lib/pebble`: the embedded Pebble manifest (`manifests/pebble.yaml`, a text/template) and
+  `DirectoryURL`. No `runAsNonRoot`: the image runs as root, and OpenShift's SCC picks the user.
 - `lib/wait`: `For` (polling with a timeout; a call cut off by the deadline counts as
   `ErrTimeout`), condition readers and deployment readiness.
 

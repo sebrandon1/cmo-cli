@@ -29,6 +29,7 @@ Available Commands:
   help        Help about any command
   install     Install cert-manager (OLM on OpenShift, the release manifest elsewhere)
   issuer      Create, list, show and delete issuers and cluster issuers
+  pebble      Run Pebble, an ACME test server, to try ACME issuers without a public CA
   status      Show whether cert-manager is installed and healthy
   uninstall   Remove cert-manager from the cluster
   upgrade     Upgrade cert-manager to a newer release
@@ -696,6 +697,122 @@ Flags:
       --force        overwrite files that exist
   -h, --help         help for export
       --stdout       print the chain and key as one PEM stream instead of writing files
+
+Global Flags:
+      --context string      kubeconfig context to use
+      --kubeconfig string   path to the kubeconfig (default: $KUBECONFIG, then ~/.kube/config)
+  -n, --namespace string    namespace (certificates: default is the context's namespace; issuers: set it for a namespaced Issuer, leave it out for a ClusterIssuer)
+      --no-color            don't color the output (also: NO_COLOR=1)
+  -o, --output string       output format: table, wide, json or yaml (default "table")
+      --timeout duration    how long to wait for things to become ready (default depends on the command)
+  -v, --verbose             trace the cluster API requests on stderr
+  -y, --yes                 don't ask for confirmation
+```
+
+## cmo pebble
+
+```text
+Pebble is Let's Encrypt's ACME test server. cmo runs it in the cluster (in the
+pebble namespace, or -n) so an ACME issuer can be tried with no public CA,
+account or rate limits:
+
+  cmo pebble install --always-valid
+  cmo pebble issuer pebble
+  cmo cert create web --issuer pebble --dns web.apps.example.com
+
+cert-manager still checks HTTP-01 challenges itself before Pebble sees them, so
+the DNS name must resolve to the cluster's ingress: on OpenShift, a name under
+the *.apps domain; on Kubernetes, one that points at the ingress controller
+(such as <ingress IP>.nip.io).
+
+Usage:
+  cmo pebble [flags]
+  cmo pebble [command]
+
+Available Commands:
+  install     Deploy Pebble and wait until it serves
+  issuer      Create a ClusterIssuer that gets certificates from Pebble over HTTP-01
+  uninstall   Remove Pebble (issuers that use it stay; delete them with cmo issuer delete)
+
+Flags:
+  -h, --help   help for pebble
+
+Global Flags:
+      --context string      kubeconfig context to use
+      --kubeconfig string   path to the kubeconfig (default: $KUBECONFIG, then ~/.kube/config)
+  -n, --namespace string    namespace (certificates: default is the context's namespace; issuers: set it for a namespaced Issuer, leave it out for a ClusterIssuer)
+      --no-color            don't color the output (also: NO_COLOR=1)
+  -o, --output string       output format: table, wide, json or yaml (default "table")
+      --timeout duration    how long to wait for things to become ready (default depends on the command)
+  -v, --verbose             trace the cluster API requests on stderr
+  -y, --yes                 don't ask for confirmation
+
+Use "cmo pebble [command] --help" for more information about a command.
+```
+
+## cmo pebble install
+
+```text
+Deploy Pebble and wait until it serves
+
+Usage:
+  cmo pebble install [flags]
+
+Flags:
+      --always-valid        accept every challenge without validating it (cert-manager's self-check still runs)
+      --dns-server string   DNS server Pebble resolves challenge names with (default "8.8.8.8:53")
+      --dry-run             print the objects that would be applied, and change nothing
+  -h, --help                help for install
+      --no-wait             don't wait for Pebble to serve
+      --version string      Pebble image version (default "2.10.1")
+
+Global Flags:
+      --context string      kubeconfig context to use
+      --kubeconfig string   path to the kubeconfig (default: $KUBECONFIG, then ~/.kube/config)
+  -n, --namespace string    namespace (certificates: default is the context's namespace; issuers: set it for a namespaced Issuer, leave it out for a ClusterIssuer)
+      --no-color            don't color the output (also: NO_COLOR=1)
+  -o, --output string       output format: table, wide, json or yaml (default "table")
+      --timeout duration    how long to wait for things to become ready (default depends on the command)
+  -v, --verbose             trace the cluster API requests on stderr
+  -y, --yes                 don't ask for confirmation
+```
+
+## cmo pebble issuer
+
+```text
+Create a ClusterIssuer that gets certificates from Pebble over HTTP-01
+
+Usage:
+  cmo pebble issuer NAME [flags]
+
+Flags:
+      --email string           ACME account email (Pebble doesn't check it) (default "cmo@example.com")
+  -h, --help                   help for issuer
+      --ingress-class string   ingress class for HTTP-01 (default: openshift-default on OpenShift, nginx elsewhere)
+      --no-wait                don't wait for the issuer to register
+
+Global Flags:
+      --context string      kubeconfig context to use
+      --kubeconfig string   path to the kubeconfig (default: $KUBECONFIG, then ~/.kube/config)
+  -n, --namespace string    namespace (certificates: default is the context's namespace; issuers: set it for a namespaced Issuer, leave it out for a ClusterIssuer)
+      --no-color            don't color the output (also: NO_COLOR=1)
+  -o, --output string       output format: table, wide, json or yaml (default "table")
+      --timeout duration    how long to wait for things to become ready (default depends on the command)
+  -v, --verbose             trace the cluster API requests on stderr
+  -y, --yes                 don't ask for confirmation
+```
+
+## cmo pebble uninstall
+
+```text
+Remove Pebble (issuers that use it stay; delete them with cmo issuer delete)
+
+Usage:
+  cmo pebble uninstall [flags]
+
+Flags:
+  -h, --help      help for uninstall
+      --no-wait   don't wait for the namespace to go
 
 Global Flags:
       --context string      kubeconfig context to use

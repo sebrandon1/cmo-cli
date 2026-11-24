@@ -96,3 +96,23 @@ func TestDeployments(t *testing.T) {
 		t.Errorf("notes = %v", notes)
 	}
 }
+
+// A rate limiter refuses a request that would end after the deadline before
+// the deadline passes; that is a timeout too, not its own error.
+func TestForRateLimitedNearDeadline(t *testing.T) {
+	err := For(context.Background(), time.Second, 30*time.Millisecond, func(context.Context) (bool, error) {
+		return false, errors.New("rate: Wait(n=1) would exceed context deadline")
+	})
+	if !errors.Is(err, ErrTimeout) {
+		t.Errorf("err = %v, want ErrTimeout", err)
+	}
+}
+
+// A real error stays itself even when the wait is about to end.
+func TestForKeepsErrorsNearDeadline(t *testing.T) {
+	boom := errors.New("CSV failed")
+	err := For(context.Background(), time.Second, 30*time.Millisecond, func(context.Context) (bool, error) { return false, boom })
+	if !errors.Is(err, boom) {
+		t.Errorf("err = %v, want the CSV failure", err)
+	}
+}

@@ -109,6 +109,7 @@ func TestLifecycle(t *testing.T) {
 		{"certificate", testCertificate},
 		{"renew", testRenew},
 		{"namespaced issuer", testNamespacedIssuer},
+		{"pebble acme", testPebble},
 		{"cleanup", testCleanup},
 		{"uninstall", testUninstall},
 	}
@@ -242,10 +243,7 @@ func testUninstall(t *testing.T) {
 // at the end.
 func createNamespace(t *testing.T) {
 	t.Helper()
-	cli := "kubectl"
-	if _, err := exec.LookPath(cli); err != nil {
-		cli = "oc"
-	}
+	cli := kubeCLI()
 	out, err := exec.CommandContext(t.Context(), cli, "create", "namespace", ns).CombinedOutput()
 	if err != nil && !strings.Contains(string(out), "AlreadyExists") {
 		t.Fatalf("%s create namespace: %v\n%s", cli, err, out)
@@ -291,4 +289,45 @@ func TestUpgrade(t *testing.T) {
 	if !strings.Contains(out, "True") {
 		t.Errorf("certificate lost across the upgrade:\n%s", out)
 	}
+}
+
+// acmeName is a DNS name cert-manager's HTTP-01 self-check can reach through
+// the cluster's ingress: under the *.apps domain on OpenShift, or a nip.io
+// name for the ingress-nginx Service on Kubernetes. Empty when there is none.
+func acmeName(t *testing.T) (name, class string) {
+	t.Helper()
+	cli := kubeCLI()
+	if out, err := exec.CommandContext(t.Context(), cli, "get", "ingresses.config.openshift.io", "cluster", "-o", "jsonpath={.spec.domain}").Output(); err == nil && len(out) > 0 {
+		return "pebble-e2e." + string(out), "openshift-default"
+	}
+	out, err := exec.CommandContext(t.Context(), cli, "-n", "ingress-nginx", "get", "svc", "ingress-nginx-controller", "-o", "jsonpath={.spec.clusterIP}").Output()
+	if err != nil || len(out) == 0 {
+		return "", ""
+	}
+	return "pebble-e2e." + string(out) + ".nip.io", "nginx"
+}
+
+func testPebble(t *testing.T) {
+	name, class := acmeName(t)
+	if name == "" {
+		t.Skip("no ingress for HTTP-01: install ingress-nginx (Kubernetes) to test ACME through Pebble")
+	}
+	cmoRun(t, "pebble", "install", "--always-valid")
+	t.Cleanup(func() { cmoTry(t, "pebble", "uninstall") })
+	cmoRun(t, "pebble", "issuer", "e2e-pebble", "--ingress-class", class)
+	cmoRun(t, "cert", "create", "acme", "-n", ns, "--issuer", "e2e-pebble", "--dns", name, "--timeout", "5m")
+	var info inspect
+	cmoJSON(t, &info, "cert", "inspect", "acme", "-n", ns)
+	if !strings.Contains(info.Issuer, "Pebble") {
+		t.Errorf("issued by %q, want Pebble", info.Issuer)
+	}
+	cmoRun(t, "cert", "delete", "acme", "-n", ns)
+	cmoRun(t, "issuer", "delete", "e2e-pebble")
+}
+
+func kubeCLI() string {
+	if _, err := exec.LookPath("kubectl"); err == nil {
+		return "kubectl"
+	}
+	return "oc"
 }
