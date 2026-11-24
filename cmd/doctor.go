@@ -117,6 +117,9 @@ func doctorChecks(ctx context.Context, c *kube.Clients) []check {
 	if st.Method == install.MethodOLM {
 		if st.CSVPhase == install.PhaseSucceeded {
 			add("operator", checkOK, st.CSV+" Succeeded")
+			if st.PendingUpgrade != "" {
+				add("upgrade", checkWarn, st.PendingUpgrade+" is waiting for approval (run: cmo upgrade)")
+			}
 		} else {
 			add("operator", checkFail, fmt.Sprintf("%s is %s", dash(st.CSV), dash(st.CSVPhase)))
 		}

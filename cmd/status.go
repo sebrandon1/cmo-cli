@@ -62,6 +62,9 @@ func printStatus(w io.Writer, p ui.Palette, context string, st *install.Status) 
 	}
 	if st.Method == install.MethodOLM {
 		t.Row(p.Bold("Operator"), fmt.Sprintf("%s  %s  channel %s", dash(st.CSV), dash(st.CSVPhase), dash(st.Channel)))
+		if st.PendingUpgrade != "" {
+			t.Row(p.Bold("Upgrade"), p.Yellow(st.PendingUpgrade+" is waiting for approval")+p.Dim("  (apply it with: cmo upgrade)"))
+		}
 	}
 	if st.Installed {
 		for i, d := range st.Deployments {

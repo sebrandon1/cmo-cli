@@ -31,6 +31,7 @@ Available Commands:
   issuer      Create, list, show and delete issuers and cluster issuers
   status      Show whether cert-manager is installed and healthy
   uninstall   Remove cert-manager from the cluster
+  upgrade     Upgrade cert-manager to a newer release
   version     Print the cmo version
 
 Flags:
@@ -84,6 +85,48 @@ Flags:
       --source string             OLM CatalogSource (OpenShift) (default "redhat-operators")
       --source-namespace string   namespace of the CatalogSource (OpenShift) (default "openshift-marketplace")
       --version string            version to install, such as v1.18.0 (OpenShift: operator version; Kubernetes: cert-manager release)
+
+Global Flags:
+      --context string      kubeconfig context to use
+      --kubeconfig string   path to the kubeconfig (default: $KUBECONFIG, then ~/.kube/config)
+  -n, --namespace string    namespace (certificates: default is the context's namespace; issuers: set it for a namespaced Issuer, leave it out for a ClusterIssuer)
+      --no-color            don't color the output (also: NO_COLOR=1)
+  -o, --output string       output format: table, wide, json or yaml (default "table")
+      --timeout duration    how long to wait for things to become ready (default depends on the command)
+  -v, --verbose             trace the cluster API requests on stderr
+  -y, --yes                 don't ask for confirmation
+```
+
+## cmo upgrade
+
+```text
+Upgrade an installed cert-manager. Downgrades are refused.
+
+OpenShift (OLM): for an install pinned with cmo install --version (Manual
+approval), cmo approves the InstallPlan of --version, or with no --version the
+newest one OLM is waiting on (cmo status shows it), moving the Subscription
+onto that version's stable-vX.Y channel if needed. An unpinned install
+(Automatic approval) is already kept at its channel's latest by OLM.
+
+Kubernetes: cmo applies the --version release manifest (default v1.21.3) and
+deletes what the installed release had that the new one doesn't. CRDs are
+never deleted, so certificates and issuers are untouched.
+
+Usage:
+  cmo upgrade [flags]
+
+Examples:
+  cmo status                       # shows an upgrade waiting for approval
+  cmo upgrade                      # OLM: approve it; Kubernetes: go to v1.21.3
+  cmo upgrade --version v1.20.1
+  cmo upgrade --dry-run
+
+Flags:
+      --dry-run           say what would change, and change nothing
+  -h, --help              help for upgrade
+      --manifest string   manifest file or URL of the new release (Kubernetes; needs --version)
+      --no-wait           return once the upgrade is started
+      --version string    version to upgrade to (OpenShift: operator version; Kubernetes: cert-manager release)
 
 Global Flags:
       --context string      kubeconfig context to use

@@ -44,6 +44,10 @@ type Status struct {
 	Channel  string `json:"channel,omitempty"`
 	CSV      string `json:"csv,omitempty"`
 	CSVPhase string `json:"csvPhase,omitempty"`
+	// Approval is the Subscription's installPlanApproval: Manual when pinned.
+	Approval string `json:"approval,omitempty"`
+	// PendingUpgrade is the version of an InstallPlan waiting for approval.
+	PendingUpgrade string `json:"pendingUpgrade,omitempty"`
 	// CRDs is whether any CRD a purge removes is still defined; APIs whether
 	// the Certificate API is.
 	CRDs        bool                   `json:"crds"`
@@ -131,6 +135,7 @@ func olmStatus(ctx context.Context, dyn dynamic.Interface, s *Status) error {
 	}
 	s.Installed, s.Method = true, MethodOLM
 	s.Channel, _, _ = unstructured.NestedString(sub.Object, "spec", "channel")
+	s.Approval, _, _ = unstructured.NestedString(sub.Object, "spec", "installPlanApproval")
 	s.CSV, _, _ = unstructured.NestedString(sub.Object, "status", "installedCSV")
 	if s.CSV == "" {
 		s.CSV, _, _ = unstructured.NestedString(sub.Object, "spec", "startingCSV")
@@ -139,6 +144,11 @@ func olmStatus(ctx context.Context, dyn dynamic.Interface, s *Status) error {
 		return nil
 	}
 	s.Version = strings.TrimPrefix(s.CSV, csvPrefix)
+	if plans, err := PendingPlans(ctx, dyn); err == nil && len(plans) > 0 {
+		if v := PlanVersion(plans[0]); v != "" && CompareVersions(v, s.Version) > 0 {
+			s.PendingUpgrade = v
+		}
+	}
 	csv, err := dyn.Resource(kube.GVRCSV).Namespace(OperatorNamespace).Get(ctx, s.CSV, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
 		s.CSVPhase = PhaseMissing
