@@ -31,6 +31,11 @@ var (
 	GVRClusterRole        = schema.GroupVersionResource{Group: "rbac.authorization.k8s.io", Version: "v1", Resource: "clusterroles"}
 	GVRClusterRoleBinding = schema.GroupVersionResource{Group: "rbac.authorization.k8s.io", Version: "v1", Resource: "clusterrolebindings"}
 	GVRSecret             = schema.GroupVersionResource{Version: "v1", Resource: "secrets"}
+	GVRService            = schema.GroupVersionResource{Version: "v1", Resource: "services"}
+	GVRServiceAccount     = schema.GroupVersionResource{Version: "v1", Resource: "serviceaccounts"}
+	GVRDeployment         = schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"}
+	GVRRole               = schema.GroupVersionResource{Group: "rbac.authorization.k8s.io", Version: "v1", Resource: "roles"}
+	GVRRoleBinding        = schema.GroupVersionResource{Group: "rbac.authorization.k8s.io", Version: "v1", Resource: "rolebindings"}
 )
 
 // OpenShift resources.
@@ -63,6 +68,11 @@ func ListKinds() map[schema.GroupVersionResource]string {
 		GVRClusterRole:         "ClusterRoleList",
 		GVRClusterRoleBinding:  "ClusterRoleBindingList",
 		GVRSecret:              "SecretList",
+		GVRService:             "ServiceList",
+		GVRServiceAccount:      "ServiceAccountList",
+		GVRDeployment:          "DeploymentList",
+		GVRRole:                "RoleList",
+		GVRRoleBinding:         "RoleBindingList",
 		GVRClusterVersion:      "ClusterVersionList",
 		GVRCertManagerOperator: "CertManagerList",
 	}

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/sebrandon1/cmo-cli/lib/apply"
 	"github.com/sebrandon1/cmo-cli/lib/install"
@@ -112,6 +113,24 @@ func uninstallManifest(cmd *cobra.Command, c *kube.Clients, st *install.Status) 
 		// Only leftover CRDs to purge.
 		return install.UninstallManifest(cmd.Context(), newApplier(c), c.Dyn, nil, true)
 	}
+	objs, err := manifestObjects(cmd, st)
+	if err != nil {
+		// A manifest named with --manifest must be the one used: falling back
+		// would quietly remove something else.
+		if uninstallOpts.manifest != "" {
+			return nil, err
+		}
+		fmt.Fprintf(cmd.ErrOrStderr(), "warning: %v\nRemoving the objects labeled app.kubernetes.io/instance=cert-manager instead.\n", err)
+		if objs, err = install.DiscoverManifestObjects(cmd.Context(), c.Dyn); err != nil {
+			return nil, err
+		}
+	}
+	return install.UninstallManifest(cmd.Context(), newApplier(c), c.Dyn, objs, uninstallOpts.purge)
+}
+
+// manifestObjects reads the manifest the install used: --manifest, or the
+// release of --version or of the installed deployments.
+func manifestObjects(cmd *cobra.Command, st *install.Status) ([]*unstructured.Unstructured, error) {
 	source := uninstallOpts.manifest
 	if source == "" {
 		v := uninstallOpts.version
@@ -119,7 +138,7 @@ func uninstallManifest(cmd *cobra.Command, c *kube.Clients, st *install.Status) 
 			v = st.Version
 		}
 		if v == "" {
-			return nil, fmt.Errorf("can't tell which cert-manager release is installed; pass --version or --manifest")
+			return nil, fmt.Errorf("can't tell which cert-manager release is installed")
 		}
 		source = install.ManifestURL(v)
 	}
@@ -127,11 +146,7 @@ func uninstallManifest(cmd *cobra.Command, c *kube.Clients, st *install.Status) 
 	if err != nil {
 		return nil, err
 	}
-	objs, err := install.ParseManifest(b)
-	if err != nil {
-		return nil, err
-	}
-	return install.UninstallManifest(cmd.Context(), newApplier(c), c.Dyn, objs, uninstallOpts.purge)
+	return install.ParseManifest(b)
 }
 
 // uninstallSummary says what uninstall will do, and what it leaves.
