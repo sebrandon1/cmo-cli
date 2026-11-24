@@ -23,6 +23,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 var (
@@ -113,6 +114,12 @@ func fakeAPI(t *testing.T) string {
 			_, _ = io.WriteString(w, `{"kind":"APIVersions","versions":["v1"]}`)
 		case "/apis":
 			_, _ = io.WriteString(w, `{"kind":"APIGroupList","apiVersion":"v1","groups":[{"name":"apps","versions":[{"groupVersion":"apps/v1","version":"v1"}],"preferredVersion":{"groupVersion":"apps/v1","version":"v1"}}]}`)
+		case "/apis/cert-manager.io/v1/certificates":
+			// One certificate, expiring in an hour.
+			notAfter := time.Now().Add(time.Hour).UTC().Format(time.RFC3339)
+			_, _ = io.WriteString(w, `{"apiVersion":"cert-manager.io/v1","kind":"CertificateList","items":[`+
+				`{"apiVersion":"cert-manager.io/v1","kind":"Certificate","metadata":{"name":"soon","namespace":"default"},`+
+				`"spec":{"secretName":"soon-tls","issuerRef":{"name":"ca"}},"status":{"notAfter":"`+notAfter+`"}}]}`)
 		default:
 			w.WriteHeader(http.StatusNotFound)
 			_, _ = io.WriteString(w, notFound)
@@ -222,5 +229,18 @@ func TestUninstallNothingInstalled(t *testing.T) {
 	r := run(t, fakeAPI(t), "uninstall")
 	if r.code != 0 || !strings.Contains(r.stdout, "not installed") {
 		t.Errorf("exit %d, stdout %q, stderr %q", r.code, r.stdout, r.stderr)
+	}
+}
+
+// --expiring-within exits 3 when it finds something, so a script can tell
+// "found" from "failed" (1).
+func TestExpiringWithinExitCode(t *testing.T) {
+	kc := fakeAPI(t)
+	r := run(t, kc, "cert", "list", "-A", "--expiring-within", "1d")
+	if r.code != 3 || !strings.Contains(r.stdout, "soon") {
+		t.Errorf("exit %d, stdout %q, stderr %q; want exit 3", r.code, r.stdout, r.stderr)
+	}
+	if r = run(t, kc, "cert", "list", "-A", "--expiring-within", "30m"); r.code != 0 {
+		t.Errorf("nothing expiring: exit %d, stderr %q", r.code, r.stderr)
 	}
 }

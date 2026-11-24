@@ -495,7 +495,11 @@ Global Flags:
 ## cmo cert list
 
 ```text
-List certificates
+List certificates in the namespace, or with -A in every namespace.
+
+--expiring-within lists only the certificates that expire within the window,
+or already have, and exits 3 when there are any (0 when there are none), so a
+script or cron job can act on it.
 
 Usage:
   cmo cert list [flags]
@@ -507,11 +511,13 @@ Examples:
   cmo cert list
   cmo cert list -A
   cmo cert list -A --managed -o wide
+  cmo cert list -A --expiring-within 30d || echo "renew something"
 
 Flags:
-  -A, --all-namespaces   list certificates in every namespace
-  -h, --help             help for list
-      --managed          only certificates cmo created
+  -A, --all-namespaces           list certificates in every namespace
+      --expiring-within string   only certificates expiring within this window (30d, 72h); exits 3 if any
+  -h, --help                     help for list
+      --managed                  only certificates cmo created
 
 Global Flags:
       --context string      kubeconfig context to use

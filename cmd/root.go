@@ -2,6 +2,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -104,6 +105,33 @@ func checkWide(cmd *cobra.Command) error {
 // SetVersion is called from main with the build-time version.
 func SetVersion(v string) {
 	cobrautil.SetVersion(rootCmd, v)
+}
+
+// ExitError ends cmo with a code other than 1, for a result a script can act
+// on rather than a failure.
+type ExitError struct {
+	Code int
+	Err  error
+}
+
+func (e *ExitError) Error() string { return e.Err.Error() }
+func (e *ExitError) Unwrap() error { return e.Err }
+
+// ExitFound is the code for "found what you asked about", such as certificates
+// expiring within the --expiring-within window.
+const ExitFound = 3
+
+// ExitCode is the process exit code for an error Execute returned: 0 for
+// none, an ExitError's code, and 1 otherwise.
+func ExitCode(err error) int {
+	var e *ExitError
+	switch {
+	case err == nil:
+		return 0
+	case errors.As(err, &e):
+		return e.Code
+	}
+	return 1
 }
 
 // Execute runs the root command. Ctrl+C or SIGTERM cancels the command's
