@@ -50,6 +50,12 @@ func New(kubeconfig, context string) (*Clients, error) {
 	if err != nil || ns == "" {
 		ns = "default"
 	}
+	// client-go's defaults (5 requests a second, bursts of 10) throttle a
+	// parallel install of the ~50-object manifest. Raise them unless the
+	// kubeconfig set its own.
+	if cfg.QPS == 0 {
+		cfg.QPS, cfg.Burst = 50, 100
+	}
 	wrapTransport(cfg)
 
 	k, err := kubernetes.NewForConfig(cfg)
