@@ -1,0 +1,32 @@
+# Built binaries
+/cmo
+/bin/
+/dist/
+*.exe
+*.test
+
+# Coverage / profiling
+*.out
+coverage.html
+*.prof
+
+# Local configuration and secrets: never commit these
+cmo.yaml
+*.kubeconfig
+*kubeconfig*
+auth.json
+config.json
+*.pem
+*.key
+*.crt
+.env
+.env.*
+
+# Go
+vendor/
+
+# Editors / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store

@@ -1,0 +1,66 @@
+name: E2E (Kind)
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+  workflow_dispatch:
+
+permissions: read-all
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  e2e-kind:
+    name: Kind
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      KUBECONFIG: /home/runner/.kube/config
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Create Kubernetes cluster
+        uses: palmsoftware/quick-k8s@v1.0.12
+        with:
+          numControlPlaneNodes: 1
+          numWorkerNodes: 1
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Wait for nodes
+        run: kubectl wait --for=condition=Ready nodes --all --timeout=300s
+
+      - name: Build cmo
+        run: make build && ./cmo version
+
+      - name: Run E2E tests
+        uses: nick-fields/retry@v4.0.0
+        with:
+          max_attempts: 3
+          timeout_minutes: 30
+          retry_wait_seconds: 60
+          # A failed attempt can leave cert-manager behind; start clean.
+          on_retry_command: ./cmo uninstall --purge --yes --timeout 5m || true
+          command: make test-e2e
+
+      - name: Collect diagnostics on failure
+        if: failure()
+        run: |
+          ./cmo doctor || true
+          kubectl get pods -A || true
+          kubectl get certificates,certificaterequests,issuers,clusterissuers -A || true
+          kubectl logs -n cert-manager -l app.kubernetes.io/instance=cert-manager --tail=100 --all-containers || true
+          kubectl get events -A --sort-by=.lastTimestamp | tail -50 || true

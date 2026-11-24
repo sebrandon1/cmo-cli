@@ -1,0 +1,97 @@
+name: E2E (OpenShift)
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+  schedule:
+    - cron: "0 4 * * *" # nightly, 04:00 UTC: the full OCP matrix
+  workflow_dispatch:
+
+permissions: read-all
+
+jobs:
+  e2e-ocp:
+    if: github.repository == 'sebrandon1/cmo-cli' && github.actor != 'dependabot[bot]'
+    name: OCP ${{ matrix.ocp-version }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}-${{ matrix.ocp-version }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # PRs and pushes test one version; the nightly and manual runs test all.
+        ocp-version: ${{ fromJSON((github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && '["4.20","4.21","4.22"]' || '["4.21"]') }}
+    env:
+      KUBECONFIG: /home/runner/.crc/machines/crc/kubeconfig
+    steps:
+      - name: Check Red Hat status
+        uses: palmsoftware/redhat-status@v0
+        with:
+          components: |
+            api.openshift.com
+            developers.redhat.com
+
+      - name: Check that CRC_PULL_SECRET is set
+        env:
+          super_secret: ${{ secrets.CRC_PULL_SECRET }}
+        if: ${{ env.super_secret == '' }}
+        run: |
+          echo "::error::the CRC_PULL_SECRET repository secret is not set"
+          exit 1
+
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Build cmo
+        run: make build && ./cmo version
+
+      - name: Deploy OpenShift
+        uses: palmsoftware/quick-ocp@v1.1.0
+        with:
+          ocpPullSecret: $OCP_PULL_SECRET
+          bundleCache: true
+          desiredOCPVersion: ${{ matrix.ocp-version }}
+          waitForOperatorsReady: true
+        env:
+          OCP_PULL_SECRET: ${{ secrets.CRC_PULL_SECRET }}
+
+      - name: Check the cluster
+        uses: nick-fields/retry@v4.0.0
+        with:
+          max_attempts: 10
+          timeout_minutes: 2
+          retry_wait_seconds: 30
+          command: oc get nodes && ./cmo doctor
+
+      - name: Run E2E tests
+        uses: nick-fields/retry@v4.0.0
+        with:
+          max_attempts: 3
+          timeout_minutes: 45
+          retry_wait_seconds: 60
+          on_retry_command: ./cmo uninstall --purge --yes --timeout 10m || true
+          command: make test-e2e
+
+      - name: Collect diagnostics on failure
+        if: failure()
+        run: |
+          ./cmo doctor || true
+          oc get subscription,installplan,csv -n cert-manager-operator -o wide || true
+          oc get catalogsource -n openshift-marketplace || true
+          oc get pods -n cert-manager-operator || true
+          oc get pods -n cert-manager || true
+          oc get certificates,certificaterequests,issuers,clusterissuers -A || true
+          oc get events -n cert-manager-operator --sort-by=.lastTimestamp | tail -30 || true

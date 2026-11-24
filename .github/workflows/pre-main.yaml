@@ -1,0 +1,107 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions: read-all
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          args: --timeout=5m
+      - name: golangci-lint (e2e build tag)
+        uses: golangci/golangci-lint-action@v9
+        with:
+          args: --timeout=5m --build-tags e2e ./test/e2e/...
+
+  test:
+    runs-on: ubuntu-latest
+    env:
+      # Just under the current total, so a refactor that sheds a line or two
+      # still passes; raise it with the tests that earn it.
+      COVERAGE_FLOOR: "80"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Run tests
+        run: go test -v -race -coverprofile=coverage.out ./...
+      - name: Coverage summary
+        run: |
+          total=$(go tool cover -func=coverage.out | tail -1)
+          {
+            echo "### Test coverage"
+            echo ""
+            echo '```'
+            echo "$total"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Coverage floor
+        run: |
+          pct=$(go tool cover -func=coverage.out | grep '^total:' | awk '{print $NF}' | tr -d '%')
+          echo "total coverage: ${pct}% (floor: ${COVERAGE_FLOOR}%)"
+          if awk -v p="$pct" -v f="$COVERAGE_FLOOR" 'BEGIN { exit !(p < f) }'; then
+            echo "::error::coverage ${pct}% is below the ${COVERAGE_FLOOR}% floor"
+            exit 1
+          fi
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Build
+        run: go build -v -o bin/cmo .
+      - name: Verify binary
+        run: ./bin/cmo --help
+
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Run gosec
+        # gosec v2.29.0 (and its action image) cannot load Go 1.27.2 export data;
+        # pinned to the upstream commit that bumps golang.org/x/tools to v0.52.0.
+        run: go run github.com/securego/gosec/v2/cmd/gosec@v2.29.1-0.20261012130337-71577268350e ./...
+
+  vulncheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Run govulncheck
+        run: make govulncheck
+
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
