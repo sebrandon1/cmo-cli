@@ -117,7 +117,8 @@ CI runs on every pull request:
   [quick-k8s](https://github.com/palmsoftware/quick-k8s).
 - `e2e-ocp.yaml`: the e2e suite on OpenShift from
   [quick-ocp](https://github.com/palmsoftware/quick-ocp). PRs test 4.21; the nightly run tests
-  4.20–4.22. It needs the `CRC_PULL_SECRET` repository secret.
+  4.20–4.22. It needs the `CRC_PULL_SECRET` repository secret; without it the job is skipped
+  with a notice.
 
 ## Roadmap
 
