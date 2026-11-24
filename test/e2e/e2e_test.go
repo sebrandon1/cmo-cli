@@ -176,6 +176,15 @@ func testCertificate(t *testing.T) {
 	if !strings.Contains(out, "True") {
 		t.Errorf("cert list:\n%s", out)
 	}
+	dir := t.TempDir()
+	cmoRun(t, "cert", "export", "web", "-n", ns, "--dir", dir)
+	key, err := os.Stat(filepath.Join(dir, "web.key"))
+	if err != nil || key.Mode().Perm() != 0o600 {
+		t.Errorf("exported key: %v, mode %v", err, key)
+	}
+	if b, err := os.ReadFile(filepath.Join(dir, "web.crt")); err != nil || !strings.Contains(string(b), "BEGIN CERTIFICATE") {
+		t.Errorf("exported certificate: %v", err)
+	}
 }
 
 func testRenew(t *testing.T) {

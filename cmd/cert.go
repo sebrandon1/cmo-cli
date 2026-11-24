@@ -105,6 +105,27 @@ var certRenewCmd = &cobra.Command{
 	RunE:  runCertRenew,
 }
 
+var certExportOpts struct {
+	dir    string
+	stdout bool
+	force  bool
+}
+
+var certExportCmd = &cobra.Command{
+	Use:   "export NAME",
+	Short: "Write an issued certificate and its private key to files",
+	Long: `Write the issued key pair to NAME.crt, NAME.key (mode 0600) and, when the CA
+is known, NAME-ca.crt, in --dir. --stdout prints the certificate chain and then
+the key as one PEM stream instead.
+
+This puts a private key on local disk: keep it as safe as you would the Secret.`,
+	Example: `  cmo cert export web
+  cmo cert export web -n team-a --dir ./certs
+  cmo cert export web --stdout > web.pem`,
+	Args: cobra.ExactArgs(1),
+	RunE: runCertExport,
+}
+
 var certInspectCmd = &cobra.Command{
 	Use:   "inspect NAME",
 	Short: "Decode the issued certificate: subject, SANs, validity, key and serial",
@@ -141,7 +162,12 @@ func init() {
 
 	certRenewCmd.Flags().BoolVar(&certRenewOpts.noWait, "no-wait", false, "don't wait for the new certificate")
 
-	certCmd.AddCommand(certCreateCmd, certListCmd, certGetCmd, certDeleteCmd, certRenewCmd, certInspectCmd)
+	certExportCmd.Flags().StringVar(&certExportOpts.dir, "dir", ".", "directory to write the files to")
+	certExportCmd.Flags().BoolVar(&certExportOpts.stdout, "stdout", false, "print the chain and key as one PEM stream instead of writing files")
+	certExportCmd.Flags().BoolVar(&certExportOpts.force, "force", false, "overwrite files that exist")
+	certExportCmd.MarkFlagsMutuallyExclusive("stdout", "dir")
+
+	certCmd.AddCommand(certCreateCmd, certListCmd, certGetCmd, certDeleteCmd, certRenewCmd, certInspectCmd, certExportCmd)
 	rootCmd.AddCommand(certCmd)
 }
 
@@ -477,6 +503,38 @@ func runCertInspect(cmd *cobra.Command, args []string) error {
 		return printStructured(w, info)
 	}
 	printInspect(w, palette(w), s.Namespace+"/"+s.Name, &info)
+	return nil
+}
+
+func runCertExport(cmd *cobra.Command, args []string) error {
+	c, err := newClients()
+	if err != nil {
+		return err
+	}
+	s, err := cert.ReadSecret(cmd.Context(), c.Dyn, c.Kube, certNamespace(c), args[0])
+	if err != nil {
+		return err
+	}
+	w := cmd.OutOrStdout()
+	if certExportOpts.stdout {
+		b, err := cert.Bundle(s)
+		if err != nil {
+			return err
+		}
+		_, err = w.Write(b)
+		return err
+	}
+	files, err := cert.Export(s, args[0], certExportOpts.dir, certExportOpts.force)
+	if err != nil {
+		return err
+	}
+	if structured() {
+		return printStructured(w, files)
+	}
+	p := palette(w)
+	for _, f := range files {
+		fmt.Fprintf(w, "%s %s %s\n", p.Icon("✓"), f.Path, p.Dim("("+f.Key+")"))
+	}
 	return nil
 }
 

@@ -425,6 +425,7 @@ Aliases:
 Available Commands:
   create      Request a certificate and wait for it to be issued
   delete      Delete certificates and the Secrets they wrote
+  export      Write an issued certificate and its private key to files
   get         Show a certificate's spec and status, and why it isn't ready (-o yaml for the whole object)
   inspect     Decode the issued certificate: subject, SANs, validity, key and serial
   list        List certificates
@@ -618,6 +619,40 @@ Usage:
 
 Flags:
   -h, --help   help for inspect
+
+Global Flags:
+      --context string      kubeconfig context to use
+      --kubeconfig string   path to the kubeconfig (default: $KUBECONFIG, then ~/.kube/config)
+  -n, --namespace string    namespace (certificates: default is the context's namespace; issuers: set it for a namespaced Issuer, leave it out for a ClusterIssuer)
+      --no-color            don't color the output (also: NO_COLOR=1)
+  -o, --output string       output format: table, wide, json or yaml (default "table")
+      --timeout duration    how long to wait for things to become ready (default depends on the command)
+  -v, --verbose             trace the cluster API requests on stderr
+  -y, --yes                 don't ask for confirmation
+```
+
+## cmo cert export
+
+```text
+Write the issued key pair to NAME.crt, NAME.key (mode 0600) and, when the CA
+is known, NAME-ca.crt, in --dir. --stdout prints the certificate chain and then
+the key as one PEM stream instead.
+
+This puts a private key on local disk: keep it as safe as you would the Secret.
+
+Usage:
+  cmo cert export NAME [flags]
+
+Examples:
+  cmo cert export web
+  cmo cert export web -n team-a --dir ./certs
+  cmo cert export web --stdout > web.pem
+
+Flags:
+      --dir string   directory to write the files to (default ".")
+      --force        overwrite files that exist
+  -h, --help         help for export
+      --stdout       print the chain and key as one PEM stream instead of writing files
 
 Global Flags:
       --context string      kubeconfig context to use

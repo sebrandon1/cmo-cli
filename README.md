@@ -49,6 +49,7 @@ cmo uninstall --purge --yes                # cert-manager, its namespace and its
 | `cmo cert list\|get\|delete` | List, show (with why it isn't ready) and delete certificates; `list --expiring-within 30d` exits 3 if any expire soon |
 | `cmo cert renew NAME` | Reissue a certificate now |
 | `cmo cert inspect NAME` | Decode the issued certificate |
+| `cmo cert export NAME` | Write the certificate and its key to files (`--stdout` for one PEM stream) |
 | `cmo version`, `cmo completion` | Version and shell completion |
 
 **[docs/commands.md](docs/commands.md)** has every command's flags.
