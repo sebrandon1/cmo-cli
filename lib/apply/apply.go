@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -94,27 +95,82 @@ type Mapper interface {
 type SSA struct {
 	Dyn    dynamic.Interface
 	Mapper Mapper
+	// mu guards Mapper, which applies running in parallel share.
+	mu sync.Mutex
 }
+
+// parallelism is how many objects Apply sends at once.
+const parallelism = 8
 
 // NewSSA builds an SSA applier with a cached discovery RESTMapper.
 func NewSSA(dc discovery.DiscoveryInterface, dyn dynamic.Interface) *SSA {
 	return &SSA{Dyn: dyn, Mapper: restmapper.NewDeferredDiscoveryRESTMapper(memory.NewMemCacheClient(dc))}
 }
 
-// Apply implements Applier. It stops at the first error.
+// Apply implements Applier. CRDs and Namespaces go first, since other objects
+// need them; the rest are applied in parallel. The changes come back in input
+// order. On an error, the first failing object (in input order) is reported,
+// with the changes made before it, and the next wave isn't started.
 func (s *SSA) Apply(ctx context.Context, objs []*unstructured.Unstructured) ([]Change, error) {
-	changes := make([]Change, 0, len(objs))
-	for _, o := range objs {
-		c, err := s.applyOne(ctx, o)
-		if err != nil {
-			return changes, err
+	changes := make([]Change, len(objs))
+	errs := make([]error, len(objs))
+	for _, wave := range waves(objs) {
+		var wg sync.WaitGroup
+		slots := make(chan struct{}, parallelism)
+		for _, i := range wave {
+			wg.Add(1)
+			slots <- struct{}{}
+			go func() {
+				defer func() { <-slots; wg.Done() }()
+				changes[i], errs[i] = s.applyOne(ctx, objs[i])
+			}()
 		}
-		changes = append(changes, c)
+		wg.Wait()
+		if first := firstError(errs); first >= 0 {
+			return done(changes, errs, first), errs[first]
+		}
 	}
 	return changes, nil
 }
 
+// waves splits objs, by index, into what must exist first (CRDs and
+// Namespaces) and everything else. Each wave keeps the input order.
+func waves(objs []*unstructured.Unstructured) [][]int {
+	var first, rest []int
+	for i, o := range objs {
+		switch o.GetKind() {
+		case "CustomResourceDefinition", "Namespace":
+			first = append(first, i)
+		default:
+			rest = append(rest, i)
+		}
+	}
+	return [][]int{first, rest}
+}
+
+func firstError(errs []error) int {
+	for i, err := range errs {
+		if err != nil {
+			return i
+		}
+	}
+	return -1
+}
+
+// done are the changes that succeeded before index stop, in input order.
+func done(changes []Change, errs []error, stop int) []Change {
+	out := make([]Change, 0, stop)
+	for i := 0; i < stop; i++ {
+		if errs[i] == nil && changes[i].Action != "" {
+			out = append(out, changes[i])
+		}
+	}
+	return out
+}
+
 func (s *SSA) resource(o *unstructured.Unstructured) (dynamic.ResourceInterface, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	gvk := o.GroupVersionKind()
 	m, err := s.Mapper.RESTMapping(gvk.GroupKind(), gvk.Version)
 	if meta.IsNoMatchError(err) {

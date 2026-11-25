@@ -415,3 +415,64 @@ func TestDeleteError(t *testing.T) {
 		t.Errorf("err = %v", err)
 	}
 }
+
+func TestApplyKeepsInputOrder(t *testing.T) {
+	c := newClient()
+	s := &SSA{Dyn: c, Mapper: newMapper()}
+	var objs []*unstructured.Unstructured
+	for i := range 40 {
+		objs = append(objs, obj("ConfigMap", "cmo", "cm-"+strconv.Itoa(i), nil))
+	}
+	objs = append(objs, obj("Namespace", "", "cmo", nil)) // last in, applied in the first wave
+	ch, err := s.Apply(context.Background(), objs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, o := range objs {
+		if ch[i].Name != o.GetName() || ch[i].Action != Created {
+			t.Fatalf("change %d = %v, want %s created", i, ch[i], o.GetName())
+		}
+	}
+}
+
+// A kind defined by a CRD in the same Apply resolves, because CRDs go in an
+// earlier wave and the mapper is reset when the kind isn't known yet.
+func TestApplyCRDThenItsKind(t *testing.T) {
+	m := newMapper()
+	m.late = []schema.GroupVersionKind{{Group: "example.io", Version: "v1", Kind: "Widget"}}
+	m.Add(schema.GroupVersionKind{Group: "apiextensions.k8s.io", Version: "v1", Kind: "CustomResourceDefinition"}, meta.RESTScopeRoot)
+	c := dynfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{
+		cmGVR: "ConfigMapList", nsGVR: "NamespaceList",
+		{Group: "example.io", Version: "v1", Resource: "widgets"}:                             "WidgetList",
+		{Group: "apiextensions.k8s.io", Version: "v1", Resource: "customresourcedefinitions"}: "CustomResourceDefinitionList",
+	})
+	fakeApply(c)
+	s := &SSA{Dyn: c, Mapper: m}
+	crd := &unstructured.Unstructured{Object: map[string]any{"apiVersion": "apiextensions.k8s.io/v1", "kind": "CustomResourceDefinition", "metadata": map[string]any{"name": "widgets.example.io"}}}
+	ch, err := s.Apply(context.Background(), []*unstructured.Unstructured{obj("Widget", "cmo", "w", nil), crd})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ch) != 2 || ch[0].Kind != "Widget" || ch[1].Kind != "CustomResourceDefinition" {
+		t.Errorf("changes = %v", ch)
+	}
+}
+
+func TestApplyReportsFirstErrorInInputOrder(t *testing.T) {
+	c := newClient()
+	c.PrependReactor("patch", "configmaps", func(a k8stesting.Action) (bool, runtime.Object, error) {
+		if name := a.(k8stesting.PatchAction).GetName(); name == "b" || name == "d" {
+			return true, nil, errors.New("denied " + name)
+		}
+		return false, nil, nil
+	})
+	s := &SSA{Dyn: c, Mapper: newMapper()}
+	objs := []*unstructured.Unstructured{obj("ConfigMap", "cmo", "a", nil), obj("ConfigMap", "cmo", "b", nil), obj("ConfigMap", "cmo", "c", nil), obj("ConfigMap", "cmo", "d", nil)}
+	ch, err := s.Apply(context.Background(), objs)
+	if err == nil || !strings.Contains(err.Error(), "denied b") {
+		t.Fatalf("err = %v, want the first failure, b", err)
+	}
+	if len(ch) != 1 || ch[0].Name != "a" {
+		t.Errorf("changes = %v, want only a (before b)", ch)
+	}
+}
