@@ -18,9 +18,33 @@ on:
 permissions: read-all
 
 jobs:
-  e2e-ocp:
+  # Decides whether OpenShift e2e can run here. Without the CRC pull secret (a
+  # fork, or before the secret is set) the e2e job is skipped with a notice
+  # rather than failing every run. secrets.* can't be read in a job-level if:,
+  # so this step reads it and passes the answer on as an output.
+  gate:
     if: github.repository == 'sebrandon1/cmo-cli' && github.actor != 'dependabot[bot]'
-    name: OCP ${{ matrix.ocp-version }}
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.check.outputs.run }}
+    steps:
+      - id: check
+        env:
+          PULL_SECRET: ${{ secrets.CRC_PULL_SECRET }}
+        run: |
+          if [ -z "$PULL_SECRET" ]; then
+            echo "::notice::CRC_PULL_SECRET is not set; skipping OpenShift e2e"
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  e2e-ocp:
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
+    # No matrix value in the name: a skipped job's matrix isn't expanded, and
+    # GitHub appends the version on its own when the job runs, as "OCP (4.21)".
+    name: OCP
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     concurrency:
@@ -40,14 +64,6 @@ jobs:
           components: |
             api.openshift.com
             developers.redhat.com
-
-      - name: Check that CRC_PULL_SECRET is set
-        env:
-          super_secret: ${{ secrets.CRC_PULL_SECRET }}
-        if: ${{ env.super_secret == '' }}
-        run: |
-          echo "::error::the CRC_PULL_SECRET repository secret is not set"
-          exit 1
 
       - uses: actions/checkout@v7
 
