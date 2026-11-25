@@ -15,8 +15,8 @@ cmo detects which kind of cluster it is talking to. It replaces the bash scripts
 ## Quick start
 
 Download `cmo` from the [releases](https://github.com/sebrandon1/cmo-cli/releases) (linux and
-darwin, amd64 and arm64), or build it with `make install`. `go install
-github.com/sebrandon1/cmo-cli@latest` works too, but names the binary `cmo-cli`.
+darwin, amd64 and arm64), install it with
+`go install github.com/sebrandon1/cmo-cli/cmd/cmo@latest`, or build it with `make install`.
 
 ```bash
 cmo install                                         # install cert-manager and wait until it's ready

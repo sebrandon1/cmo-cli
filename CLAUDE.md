@@ -26,6 +26,8 @@ A Cobra CLI with the same layout as `sebrandon1/vsno` and `sebrandon1/succulent-
 `lib/trace`, `lib/ui`, `lib/apply` and `lib/kube/client.go` were copied from vsno.
 
 - `main.go`: passes the build version (`-ldflags "-X main.version=..."`) to `cmd.SetVersion`.
+  `cmd/cmo/main.go` is an identical copy, so `go install .../cmd/cmo@latest` names the binary `cmo`
+  rather than `cmo-cli`. Keep the two in step; `make build` and the release use the root one.
 - `cmd/`: one file per command group.
   - `root.go`: the global flags. These are `--kubeconfig`, `--context`, `-n`, `-o table|wide|json|yaml`,
     `-v` (API trace on stderr), `--no-color`, `-y/--yes` and `--timeout` (0 means the command's
