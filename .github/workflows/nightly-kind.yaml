@@ -1,0 +1,78 @@
+name: Nightly (Kind)
+
+# PR runs cover one Kubernetes version on a runner that starts from a repo
+# change. Nightly starts from no change at all, so it catches upstream drift
+# (the cert-manager manifest at DefaultVersion, ingress-nginx) and covers the
+# neighbouring Kubernetes minors that cmo supports.
+on:
+  schedule:
+    - cron: "17 3 * * *" # nightly, 03:17 UTC
+  workflow_dispatch:
+
+permissions: read-all
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  nightly-kind:
+    name: Kind (${{ matrix.k8s-version }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        # kindest/node releases: the two minors below latest, plus latest.
+        k8s-version: ["v1.35.0", "v1.36.1", "v1.37.0"]
+    env:
+      KUBECONFIG: /home/runner/.kube/config
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Create Kubernetes cluster
+        uses: palmsoftware/quick-k8s@v1.0.13
+        with:
+          defaultNodeImage: kindest/node:${{ matrix.k8s-version }}
+          numControlPlaneNodes: 1
+          numWorkerNodes: 1
+          installIngressNginx: 'true'
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Wait for nodes
+        run: kubectl wait --for=condition=Ready nodes --all --timeout=300s
+
+      # The Pebble e2e step solves HTTP-01 through ingress-nginx. Its strict
+      # path validation (1.12+) rejects cert-manager's solver Ingress, so relax it.
+      - name: Prepare ingress-nginx for HTTP-01
+        run: |
+          kubectl -n ingress-nginx rollout status deploy/ingress-nginx-controller --timeout=300s
+          kubectl -n ingress-nginx patch configmap ingress-nginx-controller --type merge \
+            -p '{"data":{"strict-validate-path-type":"false"}}'
+
+      - name: Build cmo
+        run: make build && ./cmo version
+
+      - name: Run E2E tests
+        uses: nick-fields/retry@v4.0.0
+        with:
+          max_attempts: 3
+          timeout_minutes: 40
+          retry_wait_seconds: 60
+          # A failed attempt can leave cert-manager behind; start clean.
+          on_retry_command: ./cmo uninstall --purge --yes --timeout 5m || true
+          command: make test-e2e
+
+      - name: Collect diagnostics on failure
+        if: failure()
+        run: |
+          kubectl version || true
+          ./cmo doctor || true
+          kubectl get pods -A || true
+          kubectl get certificates,certificaterequests,issuers,clusterissuers -A || true
+          kubectl logs -n cert-manager -l app.kubernetes.io/instance=cert-manager --tail=100 --all-containers || true
+          kubectl get events -A --sort-by=.lastTimestamp | tail -50 || true
