@@ -54,7 +54,7 @@ fmt: ## Format the code
 	goimports -w .
 
 # docs/commands.md is every command's --help; regenerate it when a flag changes.
-COMMANDS = install uninstall status doctor \
+COMMANDS = install upgrade uninstall status doctor \
 	issuer "issuer create selfsigned" "issuer create ca" "issuer create acme" "issuer list" "issuer get" "issuer delete" \
 	cert "cert create" "cert list" "cert get" "cert delete" "cert renew" "cert inspect" "cert export" version
 

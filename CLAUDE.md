@@ -35,7 +35,7 @@ A Cobra CLI with the same layout as `sebrandon1/vsno` and `sebrandon1/succulent-
   - `helpers.go`: test seams (`newClients`, `newApplier`, `httpClient`, `stdinIsTTY`), `confirm`,
     `printStructured` / `printObjects`, `progress`, and the table cell helpers. `groupRunE` makes
     group commands reject unknown subcommands.
-  - `install.go`, `uninstall.go`, `status.go`, `doctor.go`, `issuer.go`, `cert.go`, `version.go`.
+  - `install.go`, `upgrade.go`, `uninstall.go`, `status.go`, `doctor.go`, `issuer.go`, `cert.go`, `version.go`.
 - `lib/kube`: client construction; GVRs for cert-manager, OLM and the built-in types; the managed-by
   label. `kubetest/` builds fake clusters for tests.
 - `lib/cluster`: detects the platform from discovery. OpenShift is any cluster that serves
@@ -48,6 +48,12 @@ A Cobra CLI with the same layout as `sebrandon1/vsno` and `sebrandon1/succulent-
   - `operands.go`: the deployment wait, and `CheckAPI`, which dry-run creates an Issuer to confirm
     the webhook serves.
   - `uninstall.go`, `status.go`.
+  - `upgrade.go`: `CompareVersions`, `PendingPlans`, `UpgradeOLM` (pinned installs only: channel
+    move plus plan approval through `WaitForCSV`), and `Removed` (objects an older manifest had,
+    never CRDs).
+  - `upgrade.go`: `CompareVersions`, `PendingPlans`, `UpgradeOLM` (pinned installs only: channel
+    move plus plan approval through `WaitForCSV`), and `Removed` (objects an older manifest had,
+    never CRDs).
 - `lib/issuer`: builders for selfsigned, ca and acme issuers, plus list, get, delete and `Resolve`.
   - `Resolve` picks an Issuer in the namespace first, then a ClusterIssuer.
   - `ca.go` holds `--generate`: a bootstrap self-signed issuer, a root CA Certificate, then the CA

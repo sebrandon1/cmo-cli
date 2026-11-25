@@ -10,6 +10,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"io"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -577,5 +578,124 @@ func TestUninstallWithoutManifestDownload(t *testing.T) {
 	r = run(t, "uninstall", "--yes", "--no-wait", "--manifest", "https://example.test/cm.yaml")
 	if r.err == nil || !strings.Contains(r.err.Error(), "503") {
 		t.Errorf("--manifest failing: %v", r.err)
+	}
+}
+
+// releases serves a manifest per release URL, as GitHub would.
+type releases map[string]string
+
+func (r releases) RoundTrip(req *http.Request) (*http.Response, error) {
+	for version, body := range r {
+		if strings.Contains(req.URL.Path, "/"+version+"/") {
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: http.Header{}}, nil
+		}
+	}
+	return &http.Response{StatusCode: http.StatusNotFound, Status: "404 Not Found", Body: http.NoBody}, nil
+}
+
+const oldRelease = testManifest + `---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cert-manager-tokenrequest
+  namespace: cert-manager
+`
+
+func TestUpgradeManifest(t *testing.T) {
+	use(t, fakeCluster(t, false, nil))
+	if r := run(t, "upgrade"); r.err == nil || !strings.Contains(r.err.Error(), "not installed") {
+		t.Errorf("not installed: %v", r.err)
+	}
+
+	rec := use(t, fakeCluster(t, false, operandDeployments("v1.20.2"), crd()))
+	old := httpClient
+	t.Cleanup(func() { httpClient = old })
+	httpClient = &http.Client{Transport: releases{"v1.20.2": oldRelease, install.DefaultVersion: testManifest}}
+
+	r := run(t, "upgrade", "--dry-run")
+	mustContain(t, "dry run", r.stdout, "Would apply 2 objects of "+install.DefaultVersion, "cert-manager/Role/cert-manager-tokenrequest")
+	if len(rec.applied) != 0 {
+		t.Errorf("--dry-run applied %v", rec.applied)
+	}
+	if r = run(t, "upgrade", "--version", "v1.20.1"); r.err == nil || !strings.Contains(r.err.Error(), "doesn't downgrade") {
+		t.Errorf("downgrade: %v", r.err)
+	}
+	if r = run(t, "upgrade", "--version", "v1.20.2"); r.err != nil || !strings.Contains(r.stdout, "up to date") {
+		t.Errorf("same version: %q, %v", r.stdout, r.err)
+	}
+	if r = run(t, "upgrade", "--manifest", "x.yaml"); r.err == nil || !strings.Contains(r.err.Error(), "needs --version") {
+		t.Errorf("--manifest alone: %v", r.err)
+	}
+	if r = run(t, "upgrade"); r.err == nil || !strings.Contains(r.err.Error(), "--yes") {
+		t.Errorf("without --yes: %v", r.err)
+	}
+	r = run(t, "upgrade", "--yes", "--no-wait")
+	if r.err != nil {
+		t.Fatalf("upgrade: %v\n%s", r.err, r.stderr)
+	}
+	mustContain(t, "upgrade", r.stdout, "upgraded v1.20.2 → "+install.DefaultVersion+" (manifest)")
+	if !slices.Equal(rec.deleted, []string{"Role/cert-manager-tokenrequest"}) {
+		t.Errorf("deleted %v; only the Role the new release dropped should go", rec.deleted)
+	}
+}
+
+func olmInstall(t *testing.T, approval string, plans ...*unstructured.Unstructured) *kube.Clients {
+	t.Helper()
+	sub := kubetest.Obj("operators.coreos.com/v1alpha1", "Subscription", install.OperatorNamespace, install.OperatorPackage,
+		map[string]any{"spec": map[string]any{"channel": "stable-v1.20", "installPlanApproval": approval},
+			"status": map[string]any{"installedCSV": install.CSVName("v1.20.0")}})
+	objs := []runtime.Object{sub, crd(),
+		kubetest.Obj("operators.coreos.com/v1alpha1", "ClusterServiceVersion", install.OperatorNamespace, install.CSVName("v1.20.0"),
+			map[string]any{"status": map[string]any{"phase": "Succeeded"}}),
+		kubetest.Obj("operators.coreos.com/v1alpha1", "ClusterServiceVersion", install.OperatorNamespace, install.CSVName("v1.20.1"),
+			map[string]any{"status": map[string]any{"phase": "Succeeded"}}),
+	}
+	for _, p := range plans {
+		objs = append(objs, p)
+	}
+	return fakeCluster(t, true, operandDeployments("v1.20.3"), objs...)
+}
+
+func plan(name, version string, approved bool) *unstructured.Unstructured {
+	return kubetest.Obj("operators.coreos.com/v1alpha1", "InstallPlan", install.OperatorNamespace, name,
+		map[string]any{"spec": map[string]any{"approved": approved, "clusterServiceVersionNames": []any{install.CSVName(version)}}})
+}
+
+func TestUpgradeOLM(t *testing.T) {
+	use(t, olmInstall(t, "Automatic"))
+	if r := run(t, "upgrade"); r.err != nil || !strings.Contains(r.stdout, "up to date") {
+		t.Errorf("automatic: %q, %v", r.stdout, r.err)
+	}
+	if r := run(t, "upgrade", "--version", "v1.20.1"); r.err == nil || !strings.Contains(r.err.Error(), "Automatic approval") {
+		t.Errorf("--version on automatic: %v", r.err)
+	}
+
+	use(t, olmInstall(t, "Manual", plan("done", "v1.20.0", true)))
+	if r := run(t, "upgrade"); r.err != nil || !strings.Contains(r.stdout, "up to date") {
+		t.Errorf("manual, nothing pending: %q, %v", r.stdout, r.err)
+	}
+
+	c := olmInstall(t, "Manual", plan("done", "v1.20.0", true), plan("next", "v1.20.1", false))
+	use(t, c)
+	r := run(t, "status")
+	mustContain(t, "status", r.stdout, "v1.20.1 is waiting for approval", "cmo upgrade")
+	r = run(t, "doctor")
+	mustContain(t, "doctor", r.stdout, "! upgrade: v1.20.1 is waiting for approval")
+	r = run(t, "upgrade", "--dry-run")
+	mustContain(t, "dry run", r.stdout, "Would upgrade the operator v1.20.0 → v1.20.1 on channel stable-v1.20")
+	r = run(t, "upgrade", "-y", "-o", "json")
+	if r.err != nil {
+		t.Fatalf("upgrade: %v\n%s", r.err, r.stderr)
+	}
+	mustContain(t, "json", r.stdout, `"to": "v1.20.1"`, `"upgraded": true`)
+	p, err := c.Dyn.Resource(kube.GVRInstallPlan).Namespace(install.OperatorNamespace).Get(t.Context(), "next", metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok, _, _ := unstructured.NestedBool(p.Object, "spec", "approved"); !ok {
+		t.Error("the pending InstallPlan was not approved")
+	}
+	if r = run(t, "upgrade", "--manifest", "x.yaml"); r.err == nil {
+		t.Error("--manifest on an OLM install accepted")
 	}
 }

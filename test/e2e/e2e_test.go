@@ -258,3 +258,37 @@ func createNamespace(t *testing.T) {
 		}
 	})
 }
+
+// TestUpgrade installs an older release and upgrades it, keeping a
+// certificate across the upgrade. On Kubernetes it starts from
+// CMO_E2E_UPGRADE_FROM (default v1.20.2). On OpenShift it runs only when
+// CMO_E2E_UPGRADE_FROM names an operator version older than the channel head.
+func TestUpgrade(t *testing.T) {
+	from := os.Getenv("CMO_E2E_UPGRADE_FROM")
+	var st status
+	cmoJSON(t, &st, "status")
+	if st.Installed {
+		t.Skip("cert-manager is already installed; TestUpgrade needs a clean cluster")
+	}
+	if from == "" {
+		if st.Platform == "openshift" {
+			t.Skip("set CMO_E2E_UPGRADE_FROM to an older operator version to test upgrades on OpenShift")
+		}
+		from = "v1.20.2"
+	}
+	cmoRun(t, "install", "--version", from, "--timeout", "20m")
+	t.Cleanup(func() { cmoTry(t, "uninstall", "--purge", "--yes", "--timeout", "10m") })
+	cmoRun(t, "issuer", "create", "selfsigned", "upgrade-ss")
+	cmoRun(t, "cert", "create", "survivor", "-n", "default", "--issuer", "upgrade-ss", "--common-name", "survivor")
+
+	cmoRun(t, "upgrade", "--yes", "--timeout", "20m")
+	var after status
+	cmoJSON(t, &after, "status")
+	if !after.Ready || after.Version == from {
+		t.Errorf("after upgrade from %s: %+v", from, after)
+	}
+	out := cmoRun(t, "cert", "get", "survivor", "-n", "default")
+	if !strings.Contains(out, "True") {
+		t.Errorf("certificate lost across the upgrade:\n%s", out)
+	}
+}

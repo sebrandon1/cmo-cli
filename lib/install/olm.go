@@ -38,6 +38,13 @@ const (
 	PhaseMissing   = "Missing"
 )
 
+// installPlanApproval values: Manual for a pinned install, which only moves
+// when cmo approves the next plan.
+const (
+	ApprovalAutomatic = "Automatic"
+	ApprovalManual    = "Manual"
+)
+
 // OLMOptions say which operator to subscribe to.
 type OLMOptions struct {
 	// Version pins the operator, such as v1.18.0: the Subscription starts at
@@ -120,10 +127,10 @@ func OLMObjects(opts OLMOptions, channel string) []*unstructured.Unstructured {
 		"name":                OperatorPackage,
 		"source":              opts.Source,
 		"sourceNamespace":     opts.SourceNamespace,
-		"installPlanApproval": "Automatic",
+		"installPlanApproval": ApprovalAutomatic,
 	}
 	if opts.Version != "" {
-		spec["installPlanApproval"] = "Manual"
+		spec["installPlanApproval"] = ApprovalManual
 		spec["startingCSV"] = CSVName(opts.Version)
 	}
 	sub := &unstructured.Unstructured{Object: map[string]any{

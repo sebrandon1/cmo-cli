@@ -40,6 +40,7 @@ cmo uninstall --purge --yes                # cert-manager, its namespace and its
 | Command | What it does |
 |---|---|
 | `cmo install` | Install cert-manager: OLM on OpenShift, the release manifest elsewhere |
+| `cmo upgrade` | Upgrade cert-manager: approve the pending OLM upgrade of a pinned install, or apply a newer release manifest |
 | `cmo uninstall` | Remove cert-manager; `--purge` also removes the CRDs and every cert-manager object |
 | `cmo status` | Show the install method, version, deployments and resource counts |
 | `cmo doctor` | Check access, the OLM catalog, deployments, the webhook, and every issuer and certificate that isn't Ready |
@@ -71,6 +72,10 @@ cmo uninstall --purge --yes                # cert-manager, its namespace and its
 ```bash
 # Pin an operator release on OpenShift (Manual approval; channel stable-v1.18)
 cmo install --version v1.18.0
+
+# See an upgrade waiting for a pinned install, then take it
+cmo status
+cmo upgrade --dry-run && cmo upgrade
 
 # A specific upstream release, or an air-gapped manifest, on Kubernetes
 cmo install --version v1.20.2
