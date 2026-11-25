@@ -699,3 +699,58 @@ func TestUpgradeOLM(t *testing.T) {
 		t.Error("--manifest on an OLM install accepted")
 	}
 }
+
+func TestPebble(t *testing.T) {
+	c := fakeCluster(t, false, nil)
+	readyOnCreate(c)
+	rec := use(t, c)
+	r := run(t, "pebble", "install", "--dry-run", "--always-valid")
+	mustContain(t, "dry run", r.stdout, "kind: Deployment", "ghcr.io/letsencrypt/pebble:", `value: "1"`)
+	if len(rec.applied) != 0 {
+		t.Errorf("--dry-run applied %v", rec.applied)
+	}
+	r = run(t, "pebble", "install", "--no-wait")
+	if r.err != nil {
+		t.Fatalf("install: %v\n%s", r.err, r.stderr)
+	}
+	mustContain(t, "install", r.stdout, "https://pebble.pebble.svc.cluster.local:14000/dir")
+	if !slices.Equal(rec.applied, []string{"Namespace/pebble", "ConfigMap/pebble-config", "Deployment/pebble", "Service/pebble"}) {
+		t.Errorf("applied %v", rec.applied)
+	}
+
+	r = run(t, "pebble", "issuer", "pebble")
+	if r.err != nil {
+		t.Fatalf("issuer: %v\n%s", r.err, r.stderr)
+	}
+	u, err := c.Dyn.Resource(kube.GVRClusterIssuer).Get(t.Context(), "pebble", metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	acme, _, _ := unstructured.NestedMap(u.Object, "spec", "acme")
+	solvers := acme["solvers"].([]any)
+	class, _, _ := unstructured.NestedString(solvers[0].(map[string]any), "http01", "ingress", "ingressClassName")
+	if acme["server"] != "https://pebble.pebble.svc.cluster.local:14000/dir" || acme["skipTLSVerify"] != true || class != "nginx" {
+		t.Errorf("issuer acme = %v, class %q", acme, class)
+	}
+
+	r = run(t, "pebble", "uninstall", "--no-wait")
+	if r.err != nil || !strings.Contains(r.stdout, "Pebble is removed") {
+		t.Errorf("uninstall: %q, %v", r.stdout, r.err)
+	}
+	if len(rec.deleted) != 4 {
+		t.Errorf("deleted %v", rec.deleted)
+	}
+
+	// On OpenShift the issuer solves through the default router.
+	oc := fakeCluster(t, true, nil)
+	readyOnCreate(oc)
+	use(t, oc)
+	if r = run(t, "pebble", "issuer", "p", "--no-wait"); r.err != nil {
+		t.Fatal(r.err)
+	}
+	u, _ = oc.Dyn.Resource(kube.GVRClusterIssuer).Get(t.Context(), "p", metav1.GetOptions{})
+	solvers, _, _ = unstructured.NestedSlice(u.Object, "spec", "acme", "solvers")
+	if class, _, _ = unstructured.NestedString(solvers[0].(map[string]any), "http01", "ingress", "ingressClassName"); class != "openshift-default" {
+		t.Errorf("OpenShift ingress class = %q", class)
+	}
+}

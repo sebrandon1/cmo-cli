@@ -1,0 +1,99 @@
+# Pebble, Let's Encrypt's ACME test server, for testing ACME issuers without
+# rate limits or a public CA. Ported from cert-manager-scripts' yaml/pebble.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{.Namespace}}
+  labels:
+    app: pebble
+    app.kubernetes.io/managed-by: cmo-cli
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pebble-config
+  namespace: {{.Namespace}}
+  labels:
+    app: pebble
+    app.kubernetes.io/managed-by: cmo-cli
+data:
+  pebble-config.json: |
+    {
+      "pebble": {
+        "listenAddress": "0.0.0.0:14000",
+        "managementListenAddress": "0.0.0.0:15000",
+        "certificate": "/test/certs/localhost/cert.pem",
+        "privateKey": "/test/certs/localhost/key.pem",
+        "httpPort": 80,
+        "tlsPort": 443,
+        "ocspResponderURL": "",
+        "externalAccountBindingRequired": false
+      }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pebble
+  namespace: {{.Namespace}}
+  labels:
+    app: pebble
+    app.kubernetes.io/managed-by: cmo-cli
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pebble
+  template:
+    metadata:
+      labels:
+        app: pebble
+    spec:
+      # Not runAsNonRoot: the image runs as root, and a fixed runAsUser would
+      # break OpenShift, whose restricted SCC picks the user itself.
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: pebble
+        image: {{.Image}}
+        imagePullPolicy: IfNotPresent
+        args: ["-config", "/test/config/pebble-config.json", "-dnsserver", "{{.DNSServer}}"]
+        ports:
+        - {name: acme, containerPort: 14000, protocol: TCP}
+        - {name: management, containerPort: 15000, protocol: TCP}
+        env:
+        - {name: PEBBLE_VA_NOSLEEP, value: "1"}
+        - {name: PEBBLE_VA_ALWAYS_VALID, value: "{{.AlwaysValid}}"}
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+        readinessProbe:
+          httpGet: {path: /dir, port: 14000, scheme: HTTPS}
+          initialDelaySeconds: 2
+          periodSeconds: 5
+        volumeMounts:
+        - {name: config, mountPath: /test/config, readOnly: true}
+        resources:
+          requests: {memory: 64Mi, cpu: 50m}
+          limits: {memory: 128Mi, cpu: 200m}
+      volumes:
+      - name: config
+        configMap:
+          name: pebble-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pebble
+  namespace: {{.Namespace}}
+  labels:
+    app: pebble
+    app.kubernetes.io/managed-by: cmo-cli
+spec:
+  selector:
+    app: pebble
+  ports:
+  - {name: acme, port: 14000, targetPort: 14000}
+  - {name: management, port: 15000, targetPort: 15000}

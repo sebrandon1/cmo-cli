@@ -51,6 +51,7 @@ cmo uninstall --purge --yes                # cert-manager, its namespace and its
 | `cmo cert renew NAME` | Reissue a certificate now |
 | `cmo cert inspect NAME` | Decode the issued certificate |
 | `cmo cert export NAME` | Write the certificate and its key to files (`--stdout` for one PEM stream) |
+| `cmo pebble install\|issuer\|uninstall` | Run Pebble, an ACME test server, in the cluster to try ACME issuers without a public CA |
 | `cmo version`, `cmo completion` | Version and shell completion |
 
 **[docs/commands.md](docs/commands.md)** has every command's flags.
@@ -130,7 +131,7 @@ CI runs on every pull request:
 
 These are features of cert-manager-scripts that are not ported yet:
 
-- Pebble and fake-DNS harnesses for HTTP-01 and DNS-01 tests
+- a fake-DNS harness for DNS-01 tests (Pebble for HTTP-01 is `cmo pebble`)
 - API server certificate rollout on OpenShift
 - monitoring (ServiceMonitor, alerts)
 - the IBU and OADP scenarios
