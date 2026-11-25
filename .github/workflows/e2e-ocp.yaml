@@ -11,8 +11,6 @@ on:
     paths-ignore:
       - '**/*.md'
       - 'docs/**'
-  schedule:
-    - cron: "0 4 * * *" # nightly, 04:00 UTC: the full OCP matrix
   workflow_dispatch:
 
 permissions: read-all
@@ -53,8 +51,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # PRs and pushes test one version; the nightly and manual runs test all.
-        ocp-version: ${{ fromJSON((github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && '["4.20","4.21","4.22"]' || '["4.21"]') }}
+        # One version on PRs. nightly-ocp.yaml runs the full 4.20–4.22 matrix.
+        ocp-version: ["4.21"]
     env:
       KUBECONFIG: /home/runner/.crc/machines/crc/kubeconfig
     steps:

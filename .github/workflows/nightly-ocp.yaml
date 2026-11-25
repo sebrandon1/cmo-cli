@@ -1,0 +1,111 @@
+name: Nightly (OpenShift)
+
+# The full OCP matrix, once a day. PRs test a single OCP minor; this one also
+# exercises the OLM upgrade when OCP_UPGRADE_FROM names an older operator
+# version (a repository variable, since the value goes stale with each
+# release). Without it the upgrade test skips itself.
+on:
+  schedule:
+    - cron: "17 4 * * *" # nightly, 04:17 UTC
+  workflow_dispatch:
+
+permissions: read-all
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  # Without the CRC pull secret (a fork, or before the secret is set) the e2e
+  # job is skipped with a notice rather than failing every night. secrets.*
+  # can't be read in a job-level if:, so this step reads it and passes the
+  # answer on as an output.
+  gate:
+    if: github.repository == 'sebrandon1/cmo-cli'
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.check.outputs.run }}
+    steps:
+      - id: check
+        env:
+          PULL_SECRET: ${{ secrets.CRC_PULL_SECRET }}
+        run: |
+          if [ -z "$PULL_SECRET" ]; then
+            echo "::notice::CRC_PULL_SECRET is not set; skipping OpenShift e2e"
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  nightly-ocp:
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
+    # No matrix value in the name: a skipped job's matrix isn't expanded, and
+    # GitHub appends the version on its own when the job runs, as "OCP (4.21)".
+    name: OCP
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    concurrency:
+      group: ${{ github.workflow }}-${{ matrix.ocp-version }}
+      cancel-in-progress: false
+    strategy:
+      fail-fast: false
+      matrix:
+        ocp-version: ["4.20", "4.21", "4.22"]
+    env:
+      KUBECONFIG: /home/runner/.crc/machines/crc/kubeconfig
+      CMO_E2E_UPGRADE_FROM: ${{ vars.OCP_UPGRADE_FROM }}
+    steps:
+      - name: Check Red Hat status
+        uses: palmsoftware/redhat-status@v0
+        with:
+          components: |
+            api.openshift.com
+            developers.redhat.com
+
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Build cmo
+        run: make build && ./cmo version
+
+      - name: Deploy OpenShift
+        uses: palmsoftware/quick-ocp@v1.1.1
+        with:
+          ocpPullSecret: $OCP_PULL_SECRET
+          bundleCache: true
+          desiredOCPVersion: ${{ matrix.ocp-version }}
+          waitForOperatorsReady: true
+        env:
+          OCP_PULL_SECRET: ${{ secrets.CRC_PULL_SECRET }}
+
+      - name: Check the cluster
+        uses: nick-fields/retry@v4.0.0
+        with:
+          max_attempts: 10
+          timeout_minutes: 2
+          retry_wait_seconds: 30
+          command: oc get nodes && ./cmo doctor
+
+      - name: Run E2E tests
+        uses: nick-fields/retry@v4.0.0
+        with:
+          max_attempts: 3
+          timeout_minutes: 45
+          retry_wait_seconds: 60
+          on_retry_command: ./cmo uninstall --purge --yes --timeout 10m || true
+          command: make test-e2e
+
+      - name: Collect diagnostics on failure
+        if: failure()
+        run: |
+          ./cmo doctor || true
+          oc get subscription,installplan,csv -n cert-manager-operator -o wide || true
+          oc get catalogsource -n openshift-marketplace || true
+          oc get pods -n cert-manager-operator || true
+          oc get pods -n cert-manager || true
+          oc get certificates,certificaterequests,issuers,clusterissuers -A || true
+          oc get events -n cert-manager-operator --sort-by=.lastTimestamp | tail -30 || true

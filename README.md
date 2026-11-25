@@ -122,10 +122,15 @@ CI runs on every pull request:
 - `pre-main.yaml`: lint, tests with an 80% coverage floor, build, gosec, govulncheck, gitleaks.
 - `e2e-kind.yaml`: the e2e suite on a Kind cluster from
   [quick-k8s](https://github.com/palmsoftware/quick-k8s).
-- `e2e-ocp.yaml`: the e2e suite on OpenShift from
-  [quick-ocp](https://github.com/palmsoftware/quick-ocp). PRs test 4.21; the nightly run tests
-  4.20–4.22. It needs the `CRC_PULL_SECRET` repository secret; without it the job is skipped
-  with a notice.
+- `e2e-ocp.yaml`: the e2e suite on OpenShift 4.21 from
+  [quick-ocp](https://github.com/palmsoftware/quick-ocp).
+
+Two nightly workflows run without a repo change, so they also catch upstream drift:
+
+- `nightly-kind.yaml`: the e2e suite on Kubernetes 1.35, 1.36 and 1.37 via quick-k8s.
+- `nightly-ocp.yaml`: the e2e suite on OpenShift 4.20–4.22 via quick-ocp, plus the OLM upgrade
+  when the `OCP_UPGRADE_FROM` repository variable names an older operator version. It needs the
+  `CRC_PULL_SECRET` repository secret; without it the job is skipped with a notice.
 
 ## Roadmap
 
