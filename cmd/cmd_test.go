@@ -341,6 +341,27 @@ func TestCertCommands(t *testing.T) {
 	r = run(t, "cert", "inspect", "web", "-o", "json")
 	mustContain(t, "inspect json", r.stdout, `"keyAlgorithm": "ECDSA"`)
 
+	// tls.key is what makes it exportable; issuedSecret has only tls.crt.
+	sec, err := c.Kube.CoreV1().Secrets("default").Get(t.Context(), "web-tls", metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sec.Data["tls.key"] = []byte("KEY\n")
+	if _, err := c.Kube.CoreV1().Secrets("default").Update(t.Context(), sec, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	r = run(t, "cert", "export", "web", "--dir", dir)
+	mustContain(t, "export", r.stdout, dir+"/web.crt", dir+"/web.key")
+	if r = run(t, "cert", "export", "web", "--dir", dir); r.err == nil {
+		t.Error("export overwrote files without --force")
+	}
+	r = run(t, "cert", "export", "web", "--stdout")
+	mustContain(t, "export --stdout", r.stdout, "BEGIN CERTIFICATE", "KEY")
+	if r = run(t, "cert", "export", "web", "--stdout", "--dir", dir); r.err == nil {
+		t.Error("--stdout with --dir accepted")
+	}
+
 	r = run(t, "cert", "renew", "web", "--no-wait")
 	mustContain(t, "renew", r.stdout, "renewal of default/web triggered")
 

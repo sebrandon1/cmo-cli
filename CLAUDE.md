@@ -52,8 +52,8 @@ A Cobra CLI with the same layout as `sebrandon1/vsno` and `sebrandon1/succulent-
   - `Resolve` picks an Issuer in the namespace first, then a ClusterIssuer.
   - `ca.go` holds `--generate`: a bootstrap self-signed issuer, a root CA Certificate, then the CA
     issuer. The CA issuer is annotated with the other two, so deleting it removes them.
-- `lib/cert`: build and validate, list, delete, `WaitReady` and `Diagnose`, `Renew`, and `Inspect`
-  for x509.
+- `lib/cert`: build and validate, list, delete, `WaitReady` and `Diagnose`, `Renew`, `Inspect`
+  for x509, and `Export`/`Bundle` (`export.go`; the key is always written 0600).
   - `WaitReady` stops early if the CertificateRequest for the awaited revision failed or was denied.
   - `Diagnose` follows owner references from Certificate to CertificateRequest to Order to Challenge.
   - `Renew` sets the Issuing condition, as cmctl does.
