@@ -12,11 +12,13 @@ with no YAML to write.
 cmo detects which kind of cluster it is talking to. It replaces the bash scripts in
 [cert-manager-scripts](https://github.com/sebrandon1/cert-manager-scripts) for everyday use.
 
-## Quick start
+## Install
 
 Download `cmo` from the [releases](https://github.com/sebrandon1/cmo-cli/releases) (linux and
 darwin, amd64 and arm64), install it with
 `go install github.com/sebrandon1/cmo-cli/cmd/cmo@latest`, or build it with `make install`.
+
+## Quick start
 
 ```bash
 cmo install                                         # install cert-manager and wait until it's ready
@@ -39,109 +41,21 @@ cmo uninstall --purge --yes                # cert-manager, its namespace and its
 
 | Command | What it does |
 |---|---|
-| `cmo install` | Install cert-manager: OLM on OpenShift, the release manifest elsewhere |
-| `cmo upgrade` | Upgrade cert-manager: approve the pending OLM upgrade of a pinned install, or apply a newer release manifest |
-| `cmo uninstall` | Remove cert-manager; `--purge` also removes the CRDs and every cert-manager object |
-| `cmo status` | Show the install method, version, deployments and resource counts |
-| `cmo doctor` | Check access, the OLM catalog, deployments, the webhook, and every issuer and certificate that isn't Ready |
-| `cmo issuer create selfsigned\|ca\|acme NAME` | Create an issuer (ClusterIssuer by default, Issuer with `-n`) |
+| `cmo install`, `cmo upgrade`, `cmo uninstall` | Install cert-manager (OLM on OpenShift, the release manifest elsewhere), upgrade it, or remove it; `--purge` also removes the CRDs |
+| `cmo status`, `cmo doctor` | Show the install method, version and health; diagnose it when something isn't Ready |
+| `cmo issuer create selfsigned\|ca\|acme` | Create an issuer (ClusterIssuer by default, Issuer with `-n`) |
 | `cmo issuer list\|get\|delete` | List, show and delete issuers |
-| `cmo cert create NAME --issuer X --dns ...` | Request a certificate and wait for it to be issued |
-| `cmo cert list\|get\|delete` | List, show (with why it isn't ready) and delete certificates; `list --expiring-within 30d` exits 3 if any expire soon |
-| `cmo cert renew NAME` | Reissue a certificate now |
-| `cmo cert inspect NAME` | Decode the issued certificate |
-| `cmo cert export NAME` | Write the certificate and its key to files (`--stdout` for one PEM stream) |
+| `cmo cert create`, `cmo cert list\|get\|delete` | Request a certificate and wait for it; list, show and delete them |
+| `cmo cert renew`, `cmo cert inspect`, `cmo cert export` | Reissue a certificate, decode the issued one, or write it and its key to files |
 | `cmo pebble install\|issuer\|uninstall` | Run Pebble, an ACME test server, in the cluster to try ACME issuers without a public CA |
 | `cmo version`, `cmo completion` | Version and shell completion |
 
-**[docs/commands.md](docs/commands.md)** has every command's flags.
+## Documentation
 
-### Things that work everywhere
-
-- `-o table|json|yaml`, plus `-o wide` on the list commands. Data goes to stdout and progress to
-  stderr, so `cmo status -o json | jq` always works.
-- `-v` traces each API request the way kubectl would name it (`→ get certificates.cert-manager.io web -n default`).
-- `--dry-run` on `install` and the `create` commands prints the YAML and changes nothing.
-- `--timeout` controls how long a command waits. `--no-wait` returns as soon as the request is made.
-- Destructive commands ask first. `--yes` skips the question, and without a terminal cmo refuses
-  instead of guessing.
-- Everything cmo creates is labeled `app.kubernetes.io/managed-by=cmo-cli`. `--all-managed` uses
-  this label to delete cmo's objects and nothing else.
-
-## Examples
-
-```bash
-# Pin an operator release on OpenShift (Manual approval; channel stable-v1.18)
-cmo install --version v1.18.0
-
-# See an upgrade waiting for a pinned install, then take it
-cmo status
-cmo upgrade --dry-run && cmo upgrade
-
-# A specific upstream release, or an air-gapped manifest, on Kubernetes
-cmo install --version v1.20.2
-cmo install --manifest ./cert-manager.yaml
-
-# A namespaced self-signed Issuer, and an ECDSA certificate from it
-cmo issuer create selfsigned local -n team-a
-cmo cert create api -n team-a --issuer local --dns api.team-a.svc --key-algorithm ecdsa --key-size 384
-
-# Bring your own CA key pair (a kubernetes.io/tls Secret in the cert-manager namespace)
-cmo issuer create ca corp --secret corp-ca-keypair
-
-# Let's Encrypt staging over HTTP-01 through nginx
-cmo issuer create acme le-staging --server letsencrypt-staging --email me@example.com \
-    --http01-ingress-class nginx
-
-# A short-lived certificate, then renew it by hand
-cmo cert create short --issuer my-ca --dns short.example.com --duration 2h --renew-before 1h
-cmo cert renew short
-```
-
-## Requirements
-
-- A kubeconfig for the cluster. cmo looks at `--kubeconfig`, then `$KUBECONFIG`, then
-  `~/.kube/config`. `--context` picks a context.
-- `install` and `uninstall` need cluster-admin. The issuer and certificate commands need rights to
-  cert-manager's resources.
-- No other tools: cmo doesn't call `oc`, `kubectl`, `helm` or `openssl`.
-
-## Development
-
-```bash
-make build        # ./cmo
-make test         # unit tests, plus test/integration (the binary against a fake API server)
-make lint vet     # golangci-lint and go vet, including the e2e build tag
-make test-e2e     # the full lifecycle against $KUBECONFIG (installs and uninstalls cert-manager)
-make docs         # regenerate docs/commands.md
-make help         # every target
-```
-
-CI runs on every pull request:
-
-- `pre-main.yaml`: lint, tests with an 80% coverage floor, build, gosec, govulncheck, gitleaks.
-- `e2e-kind.yaml`: the e2e suite on a Kind cluster from
-  [quick-k8s](https://github.com/palmsoftware/quick-k8s).
-- `e2e-ocp.yaml`: the e2e suite on OpenShift 4.21 from
-  [quick-ocp](https://github.com/palmsoftware/quick-ocp).
-
-Two nightly workflows run without a repo change, so they also catch upstream drift:
-
-- `nightly-kind.yaml`: the e2e suite on Kubernetes 1.35, 1.36 and 1.37 via quick-k8s.
-- `nightly-ocp.yaml`: the e2e suite on OpenShift 4.20–4.22 via quick-ocp, plus the OLM upgrade
-  when the `OCP_UPGRADE_FROM` repository variable names an older operator version. It needs the
-  `CRC_PULL_SECRET` repository secret; without it the job is skipped with a notice.
-
-## Roadmap
-
-These are features of cert-manager-scripts that are not ported yet:
-
-- a fake-DNS harness for DNS-01 tests (Pebble for HTTP-01 is `cmo pebble`)
-- API server certificate rollout on OpenShift
-- monitoring (ServiceMonitor, alerts)
-- the IBU and OADP scenarios
-
-Also planned: istio-csr, trust-manager, and Vault and Venafi issuers.
+- [docs/usage.md](docs/usage.md) — output formats, global flags, examples and requirements.
+- [docs/commands.md](docs/commands.md) — every command and its flags.
+- [docs/development.md](docs/development.md) — build, test and CI.
+- [docs/roadmap.md](docs/roadmap.md) — what isn't ported from cert-manager-scripts yet.
 
 ## License
 
