@@ -54,15 +54,22 @@ by that name, a ClusterIssuer. --cluster-issuer skips the Issuer lookup.`,
 var certListOpts struct {
 	allNamespaces bool
 	managed       bool
+	expiring      string
 }
 
 var certListCmd = &cobra.Command{
 	Use:     "list",
 	Aliases: []string{"ls"},
 	Short:   "List certificates",
+	Long: `List certificates in the namespace, or with -A in every namespace.
+
+--expiring-within lists only the certificates that expire within the window,
+or already have, and exits 3 when there are any (0 when there are none), so a
+script or cron job can act on it.`,
 	Example: `  cmo cert list
   cmo cert list -A
-  cmo cert list -A --managed -o wide`,
+  cmo cert list -A --managed -o wide
+  cmo cert list -A --expiring-within 30d || echo "renew something"`,
 	Args: cobra.NoArgs,
 	RunE: runCertList,
 }
@@ -126,6 +133,7 @@ func init() {
 
 	certListCmd.Flags().BoolVarP(&certListOpts.allNamespaces, "all-namespaces", "A", false, "list certificates in every namespace")
 	certListCmd.Flags().BoolVar(&certListOpts.managed, "managed", false, "only certificates cmo created")
+	certListCmd.Flags().StringVar(&certListOpts.expiring, "expiring-within", "", "only certificates expiring within this window (30d, 72h); exits 3 if any")
 
 	certDeleteCmd.Flags().BoolVar(&certDeleteOpts.keepSecret, "keep-secret", false, "leave the Secret with the key pair in place")
 	certDeleteCmd.Flags().BoolVar(&certDeleteOpts.allManaged, "all-managed", false, "delete every certificate cmo created (in the namespace, or with -A everywhere)")
@@ -208,6 +216,13 @@ func timeAndUntil(t time.Time) string {
 }
 
 func runCertList(cmd *cobra.Command, _ []string) error {
+	var window time.Duration
+	if certListOpts.expiring != "" {
+		var err error
+		if window, err = cert.ParseWindow(certListOpts.expiring); err != nil {
+			return err
+		}
+	}
 	c, err := newClients()
 	if err != nil {
 		return err
@@ -224,6 +239,25 @@ func runCertList(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
+	if certListOpts.expiring != "" {
+		list = cert.Expiring(list, window, time.Now())
+		if len(list) == 0 && !structured() {
+			fmt.Fprintf(cmd.OutOrStdout(), "No certificates expire within %s\n", certListOpts.expiring)
+			return nil
+		}
+		if err := printCertList(cmd, list, ns); err != nil {
+			return err
+		}
+		if len(list) == 0 {
+			return nil
+		}
+		return &ExitError{Code: ExitFound, Err: fmt.Errorf("%s expire within %s", plural(len(list), "certificate"), certListOpts.expiring)}
+	}
+	return printCertList(cmd, list, ns)
+}
+
+// printCertList prints the list in the -o format; ns is "" for -A.
+func printCertList(cmd *cobra.Command, list []cert.Summary, ns string) error {
 	w := cmd.OutOrStdout()
 	if structured() {
 		return printStructured(w, list)

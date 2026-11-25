@@ -46,7 +46,7 @@ cmo uninstall --purge --yes                # cert-manager, its namespace and its
 | `cmo issuer create selfsigned\|ca\|acme NAME` | Create an issuer (ClusterIssuer by default, Issuer with `-n`) |
 | `cmo issuer list\|get\|delete` | List, show and delete issuers |
 | `cmo cert create NAME --issuer X --dns ...` | Request a certificate and wait for it to be issued |
-| `cmo cert list\|get\|delete` | List, show (with why it isn't ready) and delete certificates |
+| `cmo cert list\|get\|delete` | List, show (with why it isn't ready) and delete certificates; `list --expiring-within 30d` exits 3 if any expire soon |
 | `cmo cert renew NAME` | Reissue a certificate now |
 | `cmo cert inspect NAME` | Decode the issued certificate |
 | `cmo version`, `cmo completion` | Version and shell completion |
