@@ -547,3 +547,35 @@ func TestExitCode(t *testing.T) {
 		t.Errorf("wrapped ExitError: %d %q", ExitCode(wrapped), wrapped.Error())
 	}
 }
+
+// failing answers every request with 503, like GitHub being down.
+type failing struct{}
+
+func (failing) RoundTrip(*http.Request) (*http.Response, error) {
+	return &http.Response{StatusCode: http.StatusServiceUnavailable, Status: "503 Service Unavailable", Body: http.NoBody}, nil
+}
+
+func TestUninstallWithoutManifestDownload(t *testing.T) {
+	dep := kubetest.Obj("apps/v1", "Deployment", "cert-manager", "cert-manager", nil)
+	dep.SetLabels(map[string]string{"app.kubernetes.io/instance": "cert-manager"})
+	ns := kubetest.Obj("v1", "Namespace", "", "cert-manager", nil)
+	rec := use(t, fakeCluster(t, false, operandDeployments("v1.21.3"), crd(), dep, ns))
+	old := httpClient
+	t.Cleanup(func() { httpClient = old })
+	httpClient = &http.Client{Transport: failing{}}
+
+	r := run(t, "uninstall", "--yes", "--no-wait")
+	if r.err != nil {
+		t.Fatalf("uninstall: %v\n%s", r.err, r.stderr)
+	}
+	mustContain(t, "stderr", r.stderr, "warning: downloading", "503", "labeled app.kubernetes.io/instance=cert-manager instead")
+	if !slices.Contains(rec.deleted, "Deployment/cert-manager") || !slices.Contains(rec.deleted, "Namespace/cert-manager") {
+		t.Errorf("deleted %v", rec.deleted)
+	}
+
+	// A --manifest that can't be read is an error, not a reason to guess.
+	r = run(t, "uninstall", "--yes", "--no-wait", "--manifest", "https://example.test/cm.yaml")
+	if r.err == nil || !strings.Contains(r.err.Error(), "503") {
+		t.Errorf("--manifest failing: %v", r.err)
+	}
+}

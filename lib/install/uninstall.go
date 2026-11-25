@@ -76,6 +76,74 @@ func UninstallOLM(ctx context.Context, dyn dynamic.Interface, purge bool) ([]app
 	return append(changes, rest...), err
 }
 
+// instanceSelector matches what the upstream manifest creates.
+const instanceSelector = "app.kubernetes.io/instance=cert-manager"
+
+// leaderElectionNamespace holds the manifest's leader-election Roles.
+const leaderElectionNamespace = "kube-system"
+
+// discovered lists what DiscoverManifestObjects looks for, in manifest order:
+// it is deleted in reverse, so the Namespace goes last.
+var discovered = []struct {
+	gvr              schema.GroupVersionResource
+	apiVersion, kind string
+	namespaces       []string // nil: cluster-scoped
+}{
+	{kube.GVRNamespace, "v1", "Namespace", nil},
+	{kube.GVRServiceAccount, "v1", "ServiceAccount", []string{OperandNamespace}},
+	{kube.GVRClusterRole, "rbac.authorization.k8s.io/v1", "ClusterRole", nil},
+	{kube.GVRClusterRoleBinding, "rbac.authorization.k8s.io/v1", "ClusterRoleBinding", nil},
+	{kube.GVRRole, "rbac.authorization.k8s.io/v1", "Role", []string{OperandNamespace, leaderElectionNamespace}},
+	{kube.GVRRoleBinding, "rbac.authorization.k8s.io/v1", "RoleBinding", []string{OperandNamespace, leaderElectionNamespace}},
+	{kube.GVRService, "v1", "Service", []string{OperandNamespace}},
+	{kube.GVRDeployment, "apps/v1", "Deployment", []string{OperandNamespace}},
+	{kube.GVRMutatingWH, "admissionregistration.k8s.io/v1", "MutatingWebhookConfiguration", nil},
+	{kube.GVRValidatingWH, "admissionregistration.k8s.io/v1", "ValidatingWebhookConfiguration", nil},
+}
+
+// DiscoverManifestObjects finds what a manifest install created by its
+// app.kubernetes.io/instance=cert-manager label, for an uninstall that can't
+// download the manifest (air-gapped, or GitHub down). Objects without the
+// label are never included. The Namespace counts if it is the operand one.
+func DiscoverManifestObjects(ctx context.Context, dyn dynamic.Interface) ([]*unstructured.Unstructured, error) {
+	var objs []*unstructured.Unstructured
+	for _, d := range discovered {
+		if d.kind == "Namespace" {
+			if _, err := dyn.Resource(d.gvr).Get(ctx, OperandNamespace, metav1.GetOptions{}); err == nil {
+				objs = append(objs, object(d.apiVersion, d.kind, "", OperandNamespace))
+			}
+			continue
+		}
+		scopes := d.namespaces
+		if scopes == nil {
+			scopes = []string{""}
+		}
+		for _, ns := range scopes {
+			l, err := dyn.Resource(d.gvr).Namespace(ns).List(ctx, metav1.ListOptions{LabelSelector: instanceSelector})
+			if apierrors.IsNotFound(err) {
+				continue
+			}
+			if err != nil {
+				return nil, fmt.Errorf("listing %ss: %w", d.kind, err)
+			}
+			for _, o := range l.Items {
+				objs = append(objs, object(d.apiVersion, d.kind, o.GetNamespace(), o.GetName()))
+			}
+		}
+	}
+	return objs, nil
+}
+
+// object is a bare reference to an object, enough to delete it.
+func object(apiVersion, kind, ns, name string) *unstructured.Unstructured {
+	u := &unstructured.Unstructured{}
+	u.SetAPIVersion(apiVersion)
+	u.SetKind(kind)
+	u.SetNamespace(ns)
+	u.SetName(name)
+	return u
+}
+
 // UninstallManifest deletes what the release manifest created, keeping the
 // CRDs unless purge.
 func UninstallManifest(ctx context.Context, deleter apply.Deleter, dyn dynamic.Interface, objs []*unstructured.Unstructured, purge bool) ([]apply.Change, error) {

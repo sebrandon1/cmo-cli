@@ -558,3 +558,50 @@ func TestGetStatusOLMMissingCSV(t *testing.T) {
 		t.Errorf("status = %+v, %v", s, err)
 	}
 }
+
+func TestDiscoverManifestObjects(t *testing.T) {
+	ctx := context.Background()
+	inst := func(u *unstructured.Unstructured) *unstructured.Unstructured {
+		return labeled(u, "app.kubernetes.io/instance", "cert-manager")
+	}
+	c := kubetest.Clients(nil,
+		kubetest.Obj("v1", "Namespace", "", OperandNamespace, nil),
+		inst(kubetest.Obj("apps/v1", "Deployment", OperandNamespace, "cert-manager", nil)),
+		inst(kubetest.Obj("v1", "Service", OperandNamespace, "cert-manager-webhook", nil)),
+		inst(kubetest.Obj("rbac.authorization.k8s.io/v1", "Role", "kube-system", "cert-manager:leaderelection", nil)),
+		inst(kubetest.Obj("rbac.authorization.k8s.io/v1", "ClusterRole", "", "cert-manager-edit", nil)),
+		inst(kubetest.Obj("admissionregistration.k8s.io/v1", "ValidatingWebhookConfiguration", "", WebhookConfigName, nil)),
+		// Not cert-manager's: no label, or another namespace.
+		kubetest.Obj("apps/v1", "Deployment", OperandNamespace, "someone-elses", nil),
+		kubetest.Obj("rbac.authorization.k8s.io/v1", "ClusterRole", "", "admin", nil),
+		inst(kubetest.Obj("v1", "Service", "default", "stray", nil)),
+	)
+	objs, err := DiscoverManifestObjects(ctx, c.Dyn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, o := range objs {
+		got = append(got, o.GetKind()+"/"+o.GetNamespace()+"/"+o.GetName())
+	}
+	want := []string{
+		"Namespace//cert-manager",
+		"ClusterRole//cert-manager-edit",
+		"Role/kube-system/cert-manager:leaderelection",
+		"Service/cert-manager/cert-manager-webhook",
+		"Deployment/cert-manager/cert-manager",
+		"ValidatingWebhookConfiguration//cert-manager-webhook",
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("discovered\n %v\nwant\n %v", got, want)
+	}
+	for _, o := range objs {
+		if o.GetAPIVersion() == "" {
+			t.Errorf("%s has no apiVersion; the deleter can't map it", o.GetName())
+		}
+	}
+	empty, err := DiscoverManifestObjects(ctx, kubetest.Clients(nil).Dyn)
+	if err != nil || len(empty) != 0 {
+		t.Errorf("nothing installed: %v, %v", empty, err)
+	}
+}
